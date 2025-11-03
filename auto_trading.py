@@ -1304,7 +1304,13 @@ class AutoTradingSystem:
                 logger.info("ℹ️ 매수 신호가 아니거나 파싱 실패")
                 return
 
-            # 2. 일일 매수 제한 확인
+            # 2-1. 이미 매수 완료 상태인지 확인 (메시지 복사는 계속 수행)
+            if self.order_executed:
+                logger.info("ℹ️ 이미 매수 완료 상태입니다. 매수 신호는 무시하고 메시지 복사만 수행합니다.")
+                logger.info(f"📊 현재 보유: {self.buy_info.get('stock_name', 'N/A')} ({self.buy_info.get('stock_code', 'N/A')})")
+                return
+
+            # 2-2. 일일 매수 제한 확인
             if self.check_today_trading_done():
                 logger.warning("⚠️ 오늘은 이미 매수했습니다. 내일 다시 시도해주세요.")
                 return
@@ -1366,9 +1372,11 @@ class AutoTradingSystem:
             # 먼저 계좌 잔고 조회 (브라우저 시작 전)
             trading_info = self.load_today_trading_info()
 
-            # 보유 종목이 있으면 매도 모니터링만 진행 (브라우저 없이)
-            if trading_info:
-                logger.info("✅ 보유 종목이 있습니다. 매도 모니터링만 시작합니다.")
+            # 보유 종목 여부 확인
+            has_holdings = trading_info is not None
+
+            if has_holdings:
+                logger.info("✅ 보유 종목이 있습니다. 매도 모니터링과 메시지 복사를 시작합니다.")
                 logger.info("📊 브라우저 없이 WebSocket 매도 모니터링을 진행합니다.")
                 self.order_executed = True  # 매수 플래그 설정하여 추가 매수 방지
 
@@ -1391,32 +1399,16 @@ class AutoTradingSystem:
                     logger.info(f"📈 WebSocket 매도 모니터링 시작 (목표: {self.buy_info['target_profit_rate']*100:.2f}%)")
                     await self.start_websocket_monitoring()
 
-                    # WebSocket 모니터링이 계속 유지되도록 무한 대기
-                    logger.info(f"⏱️  {self.buy_info['target_profit_rate']*100:.2f}% 수익률 도달 또는 Ctrl+C로 종료할 때까지 매도 모니터링합니다...")
-                    logger.info("💡 매도 타이밍을 놓치지 않도록 계속 모니터링합니다.")
-                    logger.info("📡 WebSocket 실시간 시세 수신 중 (DEBUG 모드에서 1초마다 출력)")
-                    logger.info("⏰ 장 마감 시간 외에는 REST API로 1분마다 현재가를 조회합니다.")
-
-                    # REST API 폴링 태스크 추가 (백업 - WebSocket 데이터가 없을 때)
+                    # REST API 폴링 태스크 추가 (백업)
                     polling_task = asyncio.create_task(self.price_polling_loop())
-
-                    # WebSocket receive_loop()가 계속 실행되므로 무한 대기
-                    # 매도 완료 시 ws_receive_task가 cancel되면서 종료됨
-                    if self.ws_receive_task:
-                        try:
-                            await self.ws_receive_task
-                        except asyncio.CancelledError:
-                            logger.info("✅ WebSocket 모니터링이 정상 종료되었습니다.")
-                            polling_task.cancel()
                 else:
                     logger.info("⏸️  매도 모니터링이 비활성화되어 있습니다.")
                     logger.info("💡 수동으로 매도를 진행해야 합니다.")
                     logger.info(f"📊 보유 종목: {self.buy_info['stock_name']} ({self.buy_info['stock_code']})")
                     logger.info(f"📊 매수가: {self.buy_info['buy_price']:,}원 | 수량: {self.buy_info['quantity']}주")
-                    return
 
-            # 보유 종목이 없으면 Telegram 신호 모니터링 시작
-            else:
+            # Telegram 클라이언트 시작 (보유 종목 여부와 관계없이 항상 시작)
+            if True:  # 항상 Telegram 시작
                 logger.info("=" * 80)
                 logger.info("🚀 텔레그램 자동매매 시스템 시작")
                 logger.info("=" * 80)
@@ -1541,8 +1533,24 @@ class AutoTradingSystem:
                 logger.info("👀 매수 신호 모니터링 시작... (Ctrl+C로 종료)")
                 logger.info("=" * 80)
 
-                # 무한 대기 (Telegram 이벤트 수신 - Ctrl+C로 종료 가능)
-                await self.telegram_client.run_until_disconnected()
+                # 보유 종목이 있으면 WebSocket과 Telegram을 병렬 실행
+                if has_holdings and self.enable_sell_monitoring:
+                    logger.info("🔄 WebSocket 시세 모니터링과 Telegram 메시지 복사를 동시에 실행합니다.")
+                    logger.info("⏱️  매도 완료 또는 Ctrl+C로 종료할 때까지 계속 실행됩니다...")
+
+                    # WebSocket과 Telegram을 병렬로 실행
+                    try:
+                        await asyncio.gather(
+                            self.ws_receive_task,  # WebSocket 모니터링
+                            self.telegram_client.run_until_disconnected()  # Telegram 이벤트 수신
+                        )
+                    except asyncio.CancelledError:
+                        logger.info("✅ WebSocket 모니터링이 정상 종료되었습니다.")
+                        if 'polling_task' in locals():
+                            polling_task.cancel()
+                else:
+                    # 보유 종목이 없으면 Telegram만 실행
+                    await self.telegram_client.run_until_disconnected()
 
         except Exception as e:
             logger.error(f"오류 발생: {e}")
