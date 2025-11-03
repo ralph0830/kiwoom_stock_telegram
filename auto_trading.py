@@ -297,12 +297,18 @@ class AutoTradingSystem:
         """
         텔레그램 메시지에서 종목 정보 파싱
 
-        예시 메시지:
+        예시 메시지 1 (Ai 종목포착 시그널):
         ⭐️ Ai 종목포착 시그널
         ￣￣￣￣￣￣￣￣￣￣￣￣￣￣￣
         포착 종목명 : 유일에너테크 (340930)
         적정 매수가 : 2,870원 👉 6.49%
         포착 현재가 : 2,860원 👉 6.12%
+
+        예시 메시지 2 (상승세 알림):
+        🟥 상승세 알림
+        ￣￣￣￣￣￣￣￣￣￣￣￣￣￣￣
+        종목명 : HB테크놀러지 (078150)
+        현재가 : 2,165원 👉 8.96%
 
         Returns:
             {
@@ -313,12 +319,13 @@ class AutoTradingSystem:
             }
         """
         try:
-            # 매수 신호인지 확인
+            # 매수 신호인지 확인 (오직 "Ai 종목포착 시그널"만 인식)
             if "Ai 종목포착 시그널" not in message_text and "종목포착" not in message_text:
                 return None
 
             # 종목명과 종목코드 추출
-            stock_pattern = r'종목명\s*[:：]\s*([가-힣a-zA-Z0-9]+)\s*\((\d{6})\)'
+            # "종목명 : XXX (000000)" 또는 "포착 종목명 : XXX (000000)" 형식
+            stock_pattern = r'(?:포착\s*)?종목명\s*[:：]\s*([가-힣a-zA-Z0-9＆&\s]+?)\s*\((\d{6})\)'
             stock_match = re.search(stock_pattern, message_text)
 
             if not stock_match:
@@ -377,8 +384,7 @@ class AutoTradingSystem:
         logger.info(f"💰 현재가: {current_price:,}원")
 
         # 매수 수량 계산 (현재가 기준)
-        quantity_result = self.kiwoom_api.calculate_order_quantity(current_price, self.max_investment)
-        quantity = quantity_result["quantity"]
+        quantity = self.kiwoom_api.calculate_order_quantity(current_price, self.max_investment)
 
         if quantity <= 0:
             logger.error("❌ 매수 가능 수량이 0입니다.")
@@ -1261,7 +1267,29 @@ class AutoTradingSystem:
         msg = event.message
 
         try:
+            # 0. 먼저 모든 메시지를 TARGET 채널로 복사 (전달 헤더 없이 원본만)
+            if self.target_channel:
+                try:
+                    if msg.media:
+                        # 미디어가 있으면 파일과 함께 전송
+                        await self.telegram_client.send_file(
+                            self.target_channel,
+                            msg.media,
+                            caption=msg.text
+                        )
+                        logger.info(f"📤 메시지 복사 완료 (미디어 포함, TARGET: {self.target_channel})")
+                    elif msg.text:
+                        # 텍스트만 있으면 메시지 전송
+                        await self.telegram_client.send_message(self.target_channel, msg.text)
+                        logger.info(f"📤 메시지 복사 완료 (텍스트, TARGET: {self.target_channel})")
+                    else:
+                        logger.info("ℹ️ 복사할 내용이 없는 메시지입니다")
+                except Exception as e:
+                    logger.error(f"❌ 메시지 복사 실패: {e}")
+
+            # 1. 텍스트 메시지가 아니면 매수 로직 스킵
             if not msg.text:
+                logger.info("ℹ️ 텍스트 메시지가 아니므로 매수 처리를 건너뜁니다")
                 return
 
             logger.info("=" * 80)
@@ -1269,7 +1297,7 @@ class AutoTradingSystem:
             logger.info(f"💬 내용: {msg.text[:100]}...")
             logger.info("=" * 80)
 
-            # 1. 메시지 파싱
+            # 2. 메시지 파싱
             signal = self.parse_stock_signal(msg.text)
 
             if not signal:
@@ -1312,16 +1340,6 @@ class AutoTradingSystem:
                     polling_task = asyncio.create_task(self.price_polling_loop())
                 else:
                     logger.info("⏸️  매도 모니터링이 비활성화되어 있습니다.")
-
-                # 타겟 채널로 알림 전송 (선택)
-                if self.target_channel:
-                    await self.send_notification(
-                        f"✅ 자동 매수 완료\n\n"
-                        f"종목: {self.buy_info['stock_name']} ({self.buy_info['stock_code']})\n"
-                        f"수량: {self.buy_info['quantity']}주\n"
-                        f"매수가: {self.buy_info['buy_price']:,}원\n"
-                        f"금액: {self.buy_info['buy_price'] * self.buy_info['quantity']:,}원"
-                    )
             else:
                 logger.error("❌ 자동 매수에 실패했습니다.")
 
@@ -1329,13 +1347,10 @@ class AutoTradingSystem:
             logger.error(f"⚠️ 텔레그램 신호 처리 중 오류: {e}")
 
     async def send_notification(self, message: str):
-        """타겟 채널로 알림 전송"""
+        """타겟 채널로 알림 전송 (send_message 방식)"""
         try:
-            if self.target_channel:
-                await self.telegram_client.send_message(self.target_channel, message)
-                logger.info(f"📤 알림 전송 완료 (타겟 채널: {self.target_channel})")
-            else:
-                logger.info("ℹ️ TARGET_CHANNEL이 설정되지 않아 알림을 전송하지 않습니다")
+            await self.telegram_client.send_message(self.target_channel, message)
+            logger.info(f"📤 알림 전송 완료 (타겟 채널: {self.target_channel})")
         except Exception as e:
             logger.error(f"❌ 알림 전송 실패: {e}")
 
@@ -1406,9 +1421,22 @@ class AutoTradingSystem:
                 logger.info("🚀 텔레그램 자동매매 시스템 시작")
                 logger.info("=" * 80)
 
+                # ⏱️ 타이밍 측정 시작
+                import time
+                start_time = time.time()
+
                 # Telegram 클라이언트 시작
+                logger.info("⏱️ Telegram 클라이언트 연결 시작...")
+                connect_start = time.time()
                 await self.telegram_client.start()
+                connect_time = time.time() - connect_start
+                logger.info(f"✅ Telegram 연결 완료 (소요 시간: {connect_time:.3f}초)")
+
+                # 사용자 정보 조회
+                me_start = time.time()
                 me = await self.telegram_client.get_me()
+                me_time = time.time() - me_start
+                logger.info(f"✅ 사용자 정보 조회 완료 (소요 시간: {me_time:.3f}초)")
 
                 logger.info(f"✅ Telegram 로그인: {me.first_name} (@{me.username})")
                 logger.info(f"📥 매수 신호 모니터링 채널 (SOURCE_CHANNEL): {self.source_channel}")
@@ -1420,10 +1448,95 @@ class AutoTradingSystem:
                 logger.info(f"⏰ 매수 가능 시간: {self.buy_start_time} ~ {self.buy_end_time}")
                 logger.info("=" * 80)
 
+                # ⭐ 프로그램 시작 시 최근 메시지 조회 (놓친 신호 처리)
+                logger.info("🔍 채널의 최근 메시지를 확인합니다...")
+                msg_start = time.time()
+                try:
+                    # 최근 20개 메시지 조회
+                    messages = await self.telegram_client.get_messages(self.source_channel, limit=20)
+                    msg_time = time.time() - msg_start
+                    logger.info(f"✅ 메시지 조회 완료 ({len(messages)}개 조회, 소요 시간: {msg_time:.3f}초)")
+
+                    # 오늘 날짜
+                    today = datetime.now().date()
+
+                    # 최신 메시지부터 역순으로 확인 (오래된 것부터 처리)
+                    found_signal = False
+                    for msg in reversed(messages):
+                        # 오늘 날짜 메시지만 처리
+                        if msg.date.date() != today:
+                            continue
+
+                        # 텍스트 메시지만 처리
+                        if not msg.text:
+                            continue
+
+                        # 매수 신호 확인
+                        signal = self.parse_stock_signal(msg.text)
+                        if signal:
+                            logger.info(f"📥 최근 메시지에서 매수 신호 발견! ({msg.date.strftime('%H:%M:%S')})")
+                            logger.info(f"   종목: {signal['stock_name']} ({signal['stock_code']})")
+
+                            # 아직 매수하지 않았으면 즉시 매수
+                            if not self.check_today_trading_done() and self.is_buy_time_allowed():
+                                logger.info("🚀 놓친 신호를 지금 처리합니다!")
+
+                                # 매수 실행
+                                order_result = await self.execute_auto_buy(signal)
+
+                                if order_result and order_result.get("success"):
+                                    logger.info("🎉 자동 매수가 완료되었습니다!")
+                                    self.order_executed = True
+                                    found_signal = True
+
+                                    # 오늘 매수 기록 저장
+                                    self.record_today_trading(
+                                        stock_code=self.buy_info["stock_code"],
+                                        stock_name=self.buy_info["stock_name"],
+                                        buy_price=self.buy_info["buy_price"],
+                                        quantity=self.buy_info["quantity"]
+                                    )
+
+                                    # WebSocket 실시간 시세 모니터링 시작
+                                    if self.enable_sell_monitoring:
+                                        logger.info(f"📈 WebSocket 실시간 시세 모니터링 시작 (목표: {self.buy_info['target_profit_rate']*100:.2f}%)")
+                                        await self.start_websocket_monitoring()
+
+                                        # REST API 폴링 태스크 추가 (백업)
+                                        polling_task = asyncio.create_task(self.price_polling_loop())
+
+                                    break  # 매수 완료 후 루프 종료
+                            else:
+                                if self.check_today_trading_done():
+                                    logger.info("   → 이미 오늘 매수했으므로 건너뜁니다")
+                                else:
+                                    logger.info("   → 매수 가능 시간이 아니므로 건너뜁니다")
+
+                    if not found_signal:
+                        logger.info("✅ 최근 메시지에 처리할 매수 신호가 없습니다")
+
+                except Exception as e:
+                    msg_time = time.time() - msg_start
+                    logger.error(f"❌ 최근 메시지 조회 중 오류: {e} (소요 시간: {msg_time:.3f}초)")
+                    logger.info("📡 실시간 모니터링을 계속합니다...")
+
                 # 이벤트 핸들러 등록
+                handler_start = time.time()
                 @self.telegram_client.on(events.NewMessage(chats=self.source_channel))
                 async def handler(event):
                     await self.handle_telegram_signal(event)
+                handler_time = time.time() - handler_start
+                logger.info(f"✅ 이벤트 핸들러 등록 완료 (소요 시간: {handler_time:.3f}초)")
+
+                # ⏱️ 전체 초기화 시간 측정
+                total_time = time.time() - start_time
+                logger.info("=" * 80)
+                logger.info(f"⏱️ 초기화 완료! 총 소요 시간: {total_time:.3f}초")
+                logger.info(f"   - Telegram 연결: {connect_time:.3f}초")
+                logger.info(f"   - 사용자 정보 조회: {me_time:.3f}초")
+                logger.info(f"   - 최근 메시지 조회: {msg_time:.3f}초")
+                logger.info(f"   - 이벤트 핸들러 등록: {handler_time:.3f}초")
+                logger.info("=" * 80)
 
                 logger.info("👀 매수 신호 모니터링 시작... (Ctrl+C로 종료)")
                 logger.info("=" * 80)
