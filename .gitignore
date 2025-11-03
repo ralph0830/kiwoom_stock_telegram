@@ -14,6 +14,8 @@ wheels/
 
 # Telegram session (contains login cookies)
 telegram_session.json
+*.session
+*.session-journal
 
 # Logs
 *.log
@@ -29,3 +31,6 @@ trading_results/
 
 # Unused files
 UNUSED/
+
+# Test files
+test/

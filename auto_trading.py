@@ -1265,6 +1265,7 @@ class AutoTradingSystem:
     async def handle_telegram_signal(self, event):
         """텔레그램 신호 처리 (이벤트 핸들러)"""
         msg = event.message
+        logger.info("🔔 이벤트 핸들러 호출됨! (새 메시지 감지)")
 
         try:
             # 0. 먼저 모든 메시지를 TARGET 채널로 복사 (전달 헤더 없이 원본만)
@@ -1440,85 +1441,52 @@ class AutoTradingSystem:
                 logger.info(f"⏰ 매수 가능 시간: {self.buy_start_time} ~ {self.buy_end_time}")
                 logger.info("=" * 80)
 
-                # ⭐ 프로그램 시작 시 최근 메시지 조회 (놓친 신호 처리)
-                logger.info("🔍 채널의 최근 메시지를 확인합니다...")
+                # ⭐ 채널 엔티티 정보 확인 (디버깅)
+                logger.info("🔍 SOURCE_CHANNEL 엔티티 정보를 확인합니다...")
+                source_entity = None
+                try:
+                    source_entity = await self.telegram_client.get_entity(self.source_channel)
+                    logger.info(f"📊 채널 정보:")
+                    logger.info(f"   - 채널명: {getattr(source_entity, 'title', 'N/A')}")
+                    logger.info(f"   - 채널 ID: {source_entity.id}")
+                    logger.info(f"   - Username: @{getattr(source_entity, 'username', 'N/A')}")
+                    logger.info(f"   - 타입: {type(source_entity).__name__}")
+                except Exception as e:
+                    logger.error(f"❌ 채널 엔티티 조회 실패: {e}")
+                    logger.error(f"💡 .env의 SOURCE_CHANNEL 설정을 확인하세요!")
+                    logger.error(f"⚠️  프로그램을 종료합니다.")
+                    return
+
+                # ⭐ 프로그램 시작 시 최근 메시지 확인 (로그 확인용, 매수는 실시간만)
+                logger.info("🔍 채널의 최근 메시지를 확인합니다... (로그 확인용)")
                 msg_start = time.time()
                 try:
-                    # 최근 20개 메시지 조회
-                    messages = await self.telegram_client.get_messages(self.source_channel, limit=20)
+                    # 최근 5개 메시지 조회 (로그 확인용)
+                    messages = await self.telegram_client.get_messages(self.source_channel, limit=5)
                     msg_time = time.time() - msg_start
                     logger.info(f"✅ 메시지 조회 완료 ({len(messages)}개 조회, 소요 시간: {msg_time:.3f}초)")
 
-                    # 오늘 날짜
-                    today = datetime.now().date()
+                    # 최근 메시지 로그 출력 (디버깅용)
+                    if messages:
+                        logger.info("📋 최근 메시지:")
+                        for i, msg in enumerate(messages[:3], 1):
+                            if msg.text:
+                                logger.info(f"   [{i}] {msg.date.strftime('%H:%M:%S')} - {msg.text[:50]}...")
 
-                    # 최신 메시지부터 역순으로 확인 (오래된 것부터 처리)
-                    found_signal = False
-                    for msg in reversed(messages):
-                        # 오늘 날짜 메시지만 처리
-                        if msg.date.date() != today:
-                            continue
-
-                        # 텍스트 메시지만 처리
-                        if not msg.text:
-                            continue
-
-                        # 매수 신호 확인
-                        signal = self.parse_stock_signal(msg.text)
-                        if signal:
-                            logger.info(f"📥 최근 메시지에서 매수 신호 발견! ({msg.date.strftime('%H:%M:%S')})")
-                            logger.info(f"   종목: {signal['stock_name']} ({signal['stock_code']})")
-
-                            # 아직 매수하지 않았으면 즉시 매수
-                            if not self.check_today_trading_done() and self.is_buy_time_allowed():
-                                logger.info("🚀 놓친 신호를 지금 처리합니다!")
-
-                                # 매수 실행
-                                order_result = await self.execute_auto_buy(signal)
-
-                                if order_result and order_result.get("success"):
-                                    logger.info("🎉 자동 매수가 완료되었습니다!")
-                                    self.order_executed = True
-                                    found_signal = True
-
-                                    # 오늘 매수 기록 저장
-                                    self.record_today_trading(
-                                        stock_code=self.buy_info["stock_code"],
-                                        stock_name=self.buy_info["stock_name"],
-                                        buy_price=self.buy_info["buy_price"],
-                                        quantity=self.buy_info["quantity"]
-                                    )
-
-                                    # WebSocket 실시간 시세 모니터링 시작
-                                    if self.enable_sell_monitoring:
-                                        logger.info(f"📈 WebSocket 실시간 시세 모니터링 시작 (목표: {self.buy_info['target_profit_rate']*100:.2f}%)")
-                                        await self.start_websocket_monitoring()
-
-                                        # REST API 폴링 태스크 추가 (백업)
-                                        polling_task = asyncio.create_task(self.price_polling_loop())
-
-                                    break  # 매수 완료 후 루프 종료
-                            else:
-                                if self.check_today_trading_done():
-                                    logger.info("   → 이미 오늘 매수했으므로 건너뜁니다")
-                                else:
-                                    logger.info("   → 매수 가능 시간이 아니므로 건너뜁니다")
-
-                    if not found_signal:
-                        logger.info("✅ 최근 메시지에 처리할 매수 신호가 없습니다")
+                    logger.info("💡 놓친 메시지는 자동 매수하지 않습니다. 실시간 메시지만 처리합니다.")
 
                 except Exception as e:
                     msg_time = time.time() - msg_start
                     logger.error(f"❌ 최근 메시지 조회 중 오류: {e} (소요 시간: {msg_time:.3f}초)")
                     logger.info("📡 실시간 모니터링을 계속합니다...")
 
-                # 이벤트 핸들러 등록
+                # 이벤트 핸들러 등록 (entity 사용)
                 handler_start = time.time()
-                @self.telegram_client.on(events.NewMessage(chats=self.source_channel))
+                @self.telegram_client.on(events.NewMessage(chats=source_entity))
                 async def handler(event):
                     await self.handle_telegram_signal(event)
                 handler_time = time.time() - handler_start
-                logger.info(f"✅ 이벤트 핸들러 등록 완료 (소요 시간: {handler_time:.3f}초)")
+                logger.info(f"✅ 이벤트 핸들러 등록 완료 (채널 ID: {source_entity.id}, 소요 시간: {handler_time:.3f}초)")
 
                 # ⏱️ 전체 초기화 시간 측정
                 total_time = time.time() - start_time

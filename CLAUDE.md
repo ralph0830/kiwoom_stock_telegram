@@ -4,17 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-키움증권 REST OpenAPI와 WebSocket을 활용한 **실시간 자동매매 시스템**입니다.
-웹페이지에서 종목을 실시간으로 스크래핑하여 자동 매수하고, WebSocket으로 실시간 시세를 모니터링하여 목표 수익률 도달 시 자동으로 매도합니다.
+키움증권 REST OpenAPI와 WebSocket, Telegram API를 활용한 **실시간 자동매매 시스템**입니다.
+Telegram 채널에서 매수 신호를 실시간으로 감지하여 자동 매수하고, WebSocket으로 실시간 시세를 모니터링하여 목표 수익률 도달 시 자동으로 매도합니다.
 
 ### 주요 기능
-- 🔍 **실시간 종목 감시**: Playwright로 웹페이지 스크래핑 (0.5초 주기)
-- 💰 **자동 매수**: 시장가 즉시 매수 (REST API)
+- 📱 **Telegram 실시간 감시**: Telegram 채널에서 "Ai 종목포착 시그널" 메시지 실시간 감지
+- 📤 **메시지 자동 복사**: SOURCE 채널 → TARGET 채널로 모든 메시지 자동 전달
+- 💰 **자동 매수**: 시장가 즉시 매수 (REST API, 실시간 메시지만 처리)
 - 📈 **자동 익절**: 목표 수익률 도달 시 한 틱 아래 가격으로 지정가 매도 (100% 전량)
 - 🚨 **자동 손절**: 손절 수익률 도달 시 시장가 즉시 매도 (100% 전량)
 - ⏰ **일일 강제 청산**: 지정 시간(기본 15:19)에 수익/손실 관계없이 100% 전량 시장가 매도
 - 🔄 **WebSocket 실시간 시세**: PING/PONG 처리로 무제한 연결 유지
-- 🛡️ **안전장치**: 일일 1회 매수 제한, 중복 매도 방지
+- 🛡️ **안전장치**: 일일 1회 매수 제한, 중복 매도 방지, 매수 시간 제한
 - 📊 **세션 복원**: 프로그램 재시작 시 계좌 잔고에서 매수 정보 복원
 - 💯 **100% 전량 매도**: 계좌 잔고 실시간 조회로 수동 매수 포함 전량 매도
 
@@ -28,12 +29,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Python Version**: >=3.10
 
 **주요 의존성**:
-- `playwright>=1.55.0`: 브라우저 자동화
+- `telethon>=1.36.0`: Telegram API 클라이언트
 - `websockets>=12.0`: WebSocket 실시간 통신
 - `requests>=2.31.0`: REST API 호출
 - `python-dotenv>=1.0.1`: 환경 변수 관리
-- `fastapi>=0.109.0`: API 서버 (unused)
-- `beautifulsoup4>=4.12.0`: HTML 파싱 (unused)
+- `playwright>=1.55.0`: 브라우저 자동화 (unused - 레거시)
+- `fastapi>=0.109.0`: API 서버 (unused - 레거시)
+- `beautifulsoup4>=4.12.0`: HTML 파싱 (unused - 레거시)
 
 ## Common Commands
 
@@ -80,18 +82,9 @@ ACCOUNT_NO=12345678-01       # 계좌번호
 MAX_INVESTMENT=2000000       # 최대 투자금액 (원)
 TARGET_PROFIT_RATE=1.0       # 목표 수익률 (%) - 기본값: 1.0%
 
-# 서버 설정 (사용하지 않음 - unused)
-SERVER_HOST=0.0.0.0
-SERVER_PORT=8000
-WEBSOCKET_PORT=8765
-
-# 모니터링 설정
-MARKET_OPEN_TIME=09:00       # 장 시작 시간
-MARKET_CLOSE_TIME=15:30      # 장 마감 시간
-
 # 매수 가능 시간 설정
-BUY_START_TIME=09:00         # 매수 시작 시간
-BUY_END_TIME=09:10           # 매수 종료 시간
+BUY_START_TIME=08:50         # 매수 시작 시간
+BUY_END_TIME=12:10           # 매수 종료 시간
 
 # 매도 모니터링 설정
 ENABLE_SELL_MONITORING=true  # 자동 매도 모니터링 활성화 (true: 활성화, false: 비활성화)
@@ -104,8 +97,25 @@ STOP_LOSS_RATE=-2.5          # 손절 수익률 (%) - 기본값: -2.5%
 ENABLE_DAILY_FORCE_SELL=true # 일일 강제 청산 활성화 (true: 활성화, false: 비활성화)
 DAILY_FORCE_SELL_TIME=15:19  # 강제 청산 시간 (기본값: 15:19 - 장마감 11분 전)
 
-# 실시간 체결 정보 검증 설정 (v1.3.0)
-ENABLE_LAZY_VERIFICATION=false  # 실시간 체결 정보 자동 검증 (true: 개선 모드, false: 기존 모드)
+# 미체결 주문 처리 설정
+CANCEL_OUTSTANDING_ON_FAILURE=true   # 미체결 시 주문 취소 여부
+OUTSTANDING_CHECK_TIMEOUT=30         # 체결 확인 타임아웃 (초)
+OUTSTANDING_CHECK_INTERVAL=5         # 체결 확인 주기 (초)
+
+# 실시간 체결 정보 검증 설정
+ENABLE_LAZY_VERIFICATION=true  # 실시간 체결 정보 자동 검증 (true: 개선 모드, false: 기존 모드)
+
+# 주기적 평균단가 업데이트 설정
+BALANCE_CHECK_INTERVAL=0      # 계좌 조회 주기 (초, 0=비활성화)
+
+# Telegram API 설정 (https://my.telegram.org/auth 에서 발급)
+API_ID=12345678
+API_HASH=abcdef1234567890abcdef1234567890
+SESSION_NAME=channel_copier
+
+# Telegram 채널 설정
+SOURCE_CHANNEL=https://t.me/your_source_channel  # 매수 신호 채널
+TARGET_CHANNEL=@your_target_channel              # 알림 전송 채널 (선택)
 ```
 
 **중요**: `.env` 파일은 `.gitignore`에 포함되어야 하며, 실제 키 값은 절대 커밋하지 마세요.
@@ -275,13 +285,22 @@ WebSocket을 통한 실시간 시세 수신 및 연결 관리
 
 ### Data Flow
 
-#### 매수 플로우
-1. Playwright로 브라우저 시작 (`https://live.today-stock.kr/`)
-2. 0.5초마다 웹페이지 스크래핑으로 종목 감시
-3. 종목 포착 시 현재가 기준 매수 수량 계산
-4. REST API로 시장가 매수 주문 실행
-5. 매수 정보를 `daily_trading_lock.json`에 저장 (일일 1회 제한)
-6. WebSocket으로 실시간 시세 모니터링 시작
+#### 매수 플로우 (Telegram 실시간)
+1. Telegram 클라이언트 시작 및 SOURCE 채널 연결
+2. 이벤트 핸들러 등록 (NewMessage 이벤트)
+3. 실시간으로 새 메시지 수신 대기
+4. "Ai 종목포착 시그널" 메시지 감지
+   - 메시지 파싱: 종목명, 종목코드, 목표가, 현재가 추출
+   - 모든 메시지를 TARGET 채널로 자동 복사
+5. 매수 가능 여부 확인
+   - 일일 매수 제한 체크 (`daily_trading_lock.json`)
+   - 매수 시간 확인 (`BUY_START_TIME` ~ `BUY_END_TIME`)
+6. 현재가 기준 매수 수량 계산
+7. REST API로 시장가 매수 주문 실행
+8. 매수 정보를 `daily_trading_lock.json`에 저장 (일일 1회 제한)
+9. WebSocket으로 실시간 시세 모니터링 시작
+
+**중요**: 프로그램 시작 시 최근 메시지 조회는 로그 확인용이며, 자동 매수는 **실시간 메시지만** 처리합니다.
 
 #### 매도 플로우 (익절)
 1. WebSocket 실시간 시세 수신 (콜백: `on_price_update()`)
@@ -498,15 +517,30 @@ DEBUG=true
 
 **매수 플로우**:
 ```
-🚀 자동매매 시스템 시작...
+🚀 텔레그램 자동매매 시스템 시작
 📊 실제 계좌 잔고 조회 중...
 ℹ️ 보유 종목이 없습니다.
-✅ 페이지 로드 완료!
-🔍 종목 감시 시작...
-⏳ 종목 대기 중...
-🎯 종목 포착! [종목명]
+⏱️ Telegram 클라이언트 연결 시작...
+✅ Telegram 연결 완료 (소요 시간: 0.766초)
+✅ Telegram 로그인: Ralph (@RalphPa)
+📥 매수 신호 모니터링 채널 (SOURCE_CHANNEL): https://t.me/+xxxxx
+📤 알림 전송 채널 (TARGET_CHANNEL): @ralphstock
+💰 최대 투자금액: 10,000원
+⏰ 매수 가능 시간: 08:50 ~ 12:10
+🔍 SOURCE_CHANNEL 엔티티 정보를 확인합니다...
+📊 채널 정보:
+   - 채널명: 오늘의단타...
+   - 채널 ID: 2680666401
+   - Username: @aitodaystock
+✅ 이벤트 핸들러 등록 완료 (채널 ID: 2680666401)
+👀 매수 신호 모니터링 시작... (Ctrl+C로 종료)
+🔔 이벤트 핸들러 호출됨! (새 메시지 감지)
+📨 텔레그램 메시지 수신
+📤 메시지 복사 완료 (텍스트, TARGET: @ralphstock)
+✅ 신호 파싱 완료: {'stock_name': 'HB테크놀러지', 'stock_code': '078150', ...}
+🎯 종목 포착! 시장가 즉시 매수를 시작합니다
 ✅ 시장가 매수 주문 성공!
-📈 WebSocket 실시간 시세 모니터링 시작 (목표: 1%)
+📈 WebSocket 실시간 시세 모니터링 시작 (목표: 1.00%)
 ```
 
 **익절 플로우**:
