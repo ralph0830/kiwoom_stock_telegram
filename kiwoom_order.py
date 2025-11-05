@@ -7,7 +7,7 @@
 import os
 import re
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Optional
 from dotenv import load_dotenv
 import logging
@@ -39,12 +39,24 @@ class KiwoomOrderAPI:
             logger.info("💰 실전투자 모드로 설정되었습니다")
 
         self.access_token: Optional[str] = None
+        self._token_expiry: Optional[datetime] = None  # 토큰 만료 시간
 
         if not self.app_key or not self.secret_key:
             raise ValueError(f"환경변수에 API KEY가 설정되어 있지 않습니다. (모의투자: {use_mock})")
 
+    def _is_token_expired(self) -> bool:
+        """토큰 만료 여부 확인"""
+        if not self._token_expiry:
+            return True
+        return datetime.now() >= self._token_expiry
+
     def get_access_token(self) -> str:
-        """Access Token 발급 (OAuth2)"""
+        """Access Token 발급 (OAuth2) - 자동 갱신"""
+        # 토큰이 유효하면 재사용
+        if self.access_token and not self._is_token_expired():
+            logger.debug("✅ 기존 Access Token 재사용")
+            return self.access_token
+
         url = f"{self.base_url}/oauth2/token"
 
         headers = {"Content-Type": "application/json;charset=UTF-8"}
@@ -67,8 +79,22 @@ class KiwoomOrderAPI:
                 raise ValueError(f"Access Token을 발급받지 못했습니다. 응답: {result}")
 
             self.access_token = access_token
-            logger.info("✅ Access Token 발급 완료")
-            logger.info(f"토큰 만료일: {result.get('expires_dt', 'N/A')}")
+
+            # 토큰 만료 시간 저장
+            expires_dt_str = result.get('expires_dt')
+            if expires_dt_str:
+                try:
+                    # 키움 API 응답 형식: YYYYMMDDHHMMSS
+                    self._token_expiry = datetime.strptime(expires_dt_str, "%Y%m%d%H%M%S")
+                    logger.info("✅ Access Token 발급 완료")
+                    logger.info(f"토큰 만료일: {expires_dt_str}")
+                except ValueError:
+                    logger.warning(f"⚠️ 토큰 만료일 파싱 실패: {expires_dt_str}, 기본값(23시간) 사용")
+                    self._token_expiry = datetime.now() + timedelta(hours=23)
+            else:
+                logger.warning("⚠️ 토큰 만료일 정보 없음, 기본값(23시간) 사용")
+                self._token_expiry = datetime.now() + timedelta(hours=23)
+
             return access_token
 
         except requests.exceptions.RequestException as e:
