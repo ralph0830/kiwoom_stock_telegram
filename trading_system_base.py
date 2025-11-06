@@ -157,47 +157,160 @@ class TradingSystemBase(ABC):
             # Access Token 발급
             self.kiwoom_api.get_access_token()
 
-            # 시장가 매수 주문 (OrderExecutor 사용)
-            order_result = await self.order_executor.execute_market_buy(
-                stock_code=stock_code,
-                stock_name=stock_name,
-                quantity=quantity,
-                current_price=current_price
-            )
+            # ========================================
+            # 매수 타입에 따라 분기 (v1.6.0)
+            # ========================================
 
-            if not order_result.get("success"):
-                return None
+            if self.config.buy_order_type == "limit_plus_one_tick":
+                # ========================================
+                # 지정가 매수 (현재가 + 1틱)
+                # ========================================
+                from kiwoom_order import get_tick_size
 
-            # 매수 정보 저장
-            buy_time = datetime.now()
-            self.buy_info = {
-                "stock_code": stock_code,
-                "stock_name": stock_name,
-                "buy_price": current_price,  # 추정값
-                "quantity": quantity,
-                "buy_time": buy_time,
-                "target_profit_rate": self.buy_info["target_profit_rate"],
-                "is_verified": not self.config.enable_lazy_verification
-            }
+                tick_size = get_tick_size(current_price)
+                order_price = current_price + tick_size
 
-            # 결과 저장
-            result_data = {
-                "stock_code": stock_code,
-                "stock_name": stock_name,
-                "current_price": current_price,
-                "quantity": quantity
-            }
-            await self.save_trading_result(result_data, order_result)
+                logger.info(f"📊 매수 타입: 지정가 (한 틱 위)")
+                logger.info(f"   현재가: {current_price:,}원")
+                logger.info(f"   틱 크기: {tick_size}원")
+                logger.info(f"   주문가: {order_price:,}원")
 
-            logger.info("✅ 자동 매수 완료!")
+                # 지정가 매수 주문
+                order_result = await self.order_executor.execute_limit_buy(
+                    stock_code=stock_code,
+                    stock_name=stock_name,
+                    quantity=quantity,
+                    current_price=current_price,
+                    order_price=order_price
+                )
 
-            if self.config.enable_lazy_verification:
-                logger.info("⚡ 즉시 매도 모니터링을 시작합니다 (추정 매수가 기준)")
-                logger.info("   첫 번째 실시간 시세 수신 시 실제 체결 정보를 자동으로 확인합니다")
-            else:
-                logger.info("📝 추정 매수가로 매도 모니터링을 시작합니다")
+                if not order_result.get("success"):
+                    return None
 
-            return order_result
+                order_no = order_result.get("order_no")
+
+                # 체결 확인 (부분 체결 처리 포함)
+                execution_result = await self.order_executor.wait_for_buy_execution(
+                    stock_code=stock_code,
+                    order_qty=quantity,
+                    order_no=order_no,
+                    timeout=self.config.buy_execution_timeout,
+                    interval=self.config.buy_execution_check_interval
+                )
+
+                # ========================================
+                # 체결 결과에 따라 처리
+                # ========================================
+
+                if execution_result['status'] == 'FULLY_EXECUTED':
+                    # 100% 체결 → 정상 완료
+                    buy_time = datetime.now()
+                    self.buy_info = {
+                        "stock_code": stock_code,
+                        "stock_name": stock_name,
+                        "buy_price": execution_result['avg_buy_price'],
+                        "quantity": execution_result['executed_qty'],
+                        "buy_time": buy_time,
+                        "target_profit_rate": self.buy_info["target_profit_rate"],
+                        "is_verified": True  # 계좌 조회로 확인된 값
+                    }
+
+                    result_data = {
+                        "stock_code": stock_code,
+                        "stock_name": stock_name,
+                        "current_price": current_price,
+                        "quantity": execution_result['executed_qty']
+                    }
+                    await self.save_trading_result(result_data, order_result)
+                    logger.info("✅ 지정가 매수 완료!")
+                    return order_result
+
+                elif execution_result['status'] == 'PARTIALLY_EXECUTED':
+                    # 부분 체결 → 체결분만 수용
+                    buy_time = datetime.now()
+                    self.buy_info = {
+                        "stock_code": stock_code,
+                        "stock_name": stock_name,
+                        "buy_price": execution_result['avg_buy_price'],
+                        "quantity": execution_result['executed_qty'],  # 실제 체결 수량만
+                        "buy_time": buy_time,
+                        "target_profit_rate": self.buy_info["target_profit_rate"],
+                        "is_verified": True,
+                        "buy_order_no": order_no  # 미체결 주문 취소용
+                    }
+
+                    result_data = {
+                        "stock_code": stock_code,
+                        "stock_name": stock_name,
+                        "current_price": current_price,
+                        "quantity": execution_result['executed_qty']
+                    }
+                    await self.save_trading_result(result_data, order_result)
+                    logger.info("✅ 부분 체결 매수 완료!")
+                    logger.info(f"⚠️ 미체결 매수 주문이 남아있습니다 (주문번호: {order_no})")
+                    logger.info("💡 익절 완료 시 미체결 주문이 자동으로 취소됩니다")
+                    return order_result
+
+                else:  # NOT_EXECUTED
+                    # 0% 미체결 → 폴백 전략
+                    if self.config.buy_fallback_to_market:
+                        logger.warning("⚠️ 지정가 미체결 → 시장가로 재주문합니다")
+                        # 시장가로 폴백 (재귀 호출)
+                        original_type = self.config.buy_order_type
+                        self.config.buy_order_type = "market"  # 임시로 시장가로 변경
+                        result = await self.execute_auto_buy(stock_code, stock_name, current_price)
+                        self.config.buy_order_type = original_type  # 원복
+                        return result
+                    else:
+                        logger.error("❌ 지정가 미체결 → 매수를 포기합니다")
+                        return None
+
+            else:  # market (기본값)
+                # ========================================
+                # 시장가 매수 (기존 로직 유지)
+                # ========================================
+                logger.info("📊 매수 타입: 시장가 (즉시 체결)")
+
+                order_result = await self.order_executor.execute_market_buy(
+                    stock_code=stock_code,
+                    stock_name=stock_name,
+                    quantity=quantity,
+                    current_price=current_price
+                )
+
+                if not order_result.get("success"):
+                    return None
+
+                # 매수 정보 저장
+                buy_time = datetime.now()
+                self.buy_info = {
+                    "stock_code": stock_code,
+                    "stock_name": stock_name,
+                    "buy_price": current_price,  # 추정값
+                    "quantity": quantity,
+                    "buy_time": buy_time,
+                    "target_profit_rate": self.buy_info["target_profit_rate"],
+                    "is_verified": not self.config.enable_lazy_verification
+                }
+
+                # 결과 저장
+                result_data = {
+                    "stock_code": stock_code,
+                    "stock_name": stock_name,
+                    "current_price": current_price,
+                    "quantity": quantity
+                }
+                await self.save_trading_result(result_data, order_result)
+
+                logger.info("✅ 시장가 매수 완료!")
+
+                if self.config.enable_lazy_verification:
+                    logger.info("⚡ 즉시 매도 모니터링을 시작합니다 (추정 매수가 기준)")
+                    logger.info("   첫 번째 실시간 시세 수신 시 실제 체결 정보를 자동으로 확인합니다")
+                else:
+                    logger.info("📝 추정 매수가로 매도 모니터링을 시작합니다")
+
+                return order_result
 
         except Exception as e:
             logger.error(f"❌ 매수 주문 실행 중 오류: {e}")

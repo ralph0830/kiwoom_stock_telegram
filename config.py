@@ -46,6 +46,12 @@ class TradingConfig:
     # 주기적 계좌 조회 설정
     balance_check_interval: int  # 초 (0=비활성화)
 
+    # 매수 주문 타입 설정 (v1.6.0)
+    buy_order_type: str  # "market" | "limit_plus_one_tick"
+    buy_execution_timeout: int  # 초 (지정가 체결 확인 타임아웃)
+    buy_execution_check_interval: int  # 초 (지정가 체결 확인 주기)
+    buy_fallback_to_market: bool  # 지정가 미체결 시 시장가 재주문 여부
+
     # 디버그 모드
     debug_mode: bool
 
@@ -127,6 +133,12 @@ class TradingConfig:
             # 주기적 계좌 조회 설정
             balance_check_interval=int(os.getenv("BALANCE_CHECK_INTERVAL", "0")),
 
+            # 매수 주문 타입 설정 (v1.6.0)
+            buy_order_type=os.getenv("BUY_ORDER_TYPE", "market"),
+            buy_execution_timeout=int(os.getenv("BUY_EXECUTION_TIMEOUT", "30")),
+            buy_execution_check_interval=int(os.getenv("BUY_EXECUTION_CHECK_INTERVAL", "5")),
+            buy_fallback_to_market=os.getenv("BUY_FALLBACK_TO_MARKET", "true").lower() == "true",
+
             # 디버그 모드
             debug_mode=os.getenv("DEBUG", "false").lower() == "true",
 
@@ -171,6 +183,16 @@ class TradingConfig:
 
         if self.outstanding_check_interval <= 0:
             raise ValueError(f"체크 주기는 0보다 커야 합니다: {self.outstanding_check_interval}")
+
+        # 매수 주문 타입 검증 (v1.6.0)
+        if self.buy_order_type not in ["market", "limit_plus_one_tick"]:
+            raise ValueError(f"BUY_ORDER_TYPE은 'market' 또는 'limit_plus_one_tick'이어야 합니다: {self.buy_order_type}")
+
+        if self.buy_execution_timeout <= 0:
+            raise ValueError(f"매수 체결 확인 타임아웃은 0보다 커야 합니다: {self.buy_execution_timeout}")
+
+        if self.buy_execution_check_interval <= 0:
+            raise ValueError(f"매수 체결 확인 주기는 0보다 커야 합니다: {self.buy_execution_check_interval}")
 
     def _validate_time_format(self, time_str: str, field_name: str) -> None:
         """
