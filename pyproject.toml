@@ -11,4 +11,8 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "rich>=13.0.0",
     "telethon>=1.36.0",
+    "streamlit>=1.51.0",
+    "plotly>=6.4.0",
+    "pandas>=2.3.3",
+    "watchdog>=6.0.0",
 ]
