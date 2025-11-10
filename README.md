@@ -60,7 +60,7 @@ Telegram 채널에서 매수 신호를 실시간으로 감지하여 자동 매�
 
 1. **저장소 클론**
 ```bash
-git clone <repository-url>
+git clone https://github.com/ralph0830/kiwoom_stock_telegram
 cd stock_tel
 ```
 
