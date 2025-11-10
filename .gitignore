@@ -34,3 +34,12 @@ UNUSED/
 
 # Test files
 test/
+
+# Claude documentation
+claudedocs/
+
+# Telegram status
+.telegram_status.json
+
+# Portable build output
+portable/build/

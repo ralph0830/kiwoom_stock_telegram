@@ -49,29 +49,63 @@ Telegram 채널에서 매수 신호를 실시간으로 감지하여 자동 매�
 
 ## 🚀 시작하기
 
-### 필요 사항
+### 📦 설치 방법
 
+두 가지 설치 방법 중 선택하세요:
+
+#### 옵션 A: Portable 패키지 (비전문가용) ⭐ 권장
+
+**Python 설치 없이** 바로 실행 가능한 독립 실행 패키지입니다.
+
+**특징**:
+- ✅ Python 설치 불필요
+- ✅ GUI 설정 도구 제공
+- ✅ 원클릭 실행
+- ✅ Windows 10+ 지원
+
+**다운로드 및 실행**:
+1. `stock_trading_v1.6.0_portable.zip` 다운로드
+2. 압축 해제
+3. `설정하기.lnk` 더블클릭 → 설정 입력
+4. `자동매매 시작.lnk` 더블클릭 → 실행
+
+**상세 가이드**: `portable/docs/USER_GUIDE.md` 참고
+
+---
+
+#### 옵션 B: 개발자 설치 (CLI)
+
+**필요 사항**:
 - Python 3.10 이상
 - UV 패키지 매니저
 - 키움증권 API 키 (실전투자 / 모의투자)
 - Telegram API 인증 정보
 
-### 설치
+**설치 단계**:
 
 1. **저장소 클론**
 ```bash
-git clone <repository-url>
+git clone https://github.com/yourusername/stock_tel.git
 cd stock_tel
 ```
 
 2. **의존성 설치**
 ```bash
+# UV 사용 (권장)
 uv sync
+
+# 또는 pip 사용
+pip install -r requirements.txt
 ```
 
 3. **환경 변수 설정**
 
 `.env` 파일을 생성하고 다음 내용을 설정하세요:
+
+> 💡 **팁**: `.env.example` 파일을 복사하여 시작하세요
+> ```bash
+> cp .env.example .env
+> ```
 
 ```env
 # ============================================================
@@ -208,27 +242,105 @@ TARGET_CHANNEL=@your_target_channel              # 알림을 보낼 채널 (선�
 
 **⚠️ 중요**: `.env` 파일은 절대 Git에 커밋하지 마세요! (`.gitignore`에 포함됨)
 
-### 사용법
+---
 
-1. **프로그램 실행**
+### 🎮 사용법
+
+#### 방법 1: CLI 실행 (터미널)
+
 ```bash
-# UV 사용
+# UV 사용 (권장)
 uv run python auto_trading.py
 
 # 또는 일반 Python
 python auto_trading.py
 ```
 
-2. **프로그램 동작**
-   - Telegram 채널 연결 및 로그인
-   - 최근 10개 메시지 조회 (로그 확인용)
-   - 실시간 메시지 모니터링 시작
-   - "Ai 종목포착 시그널" 메시지 감지 시 자동 매수
-   - WebSocket으로 실시간 시세 모니터링
-   - 목표 수익률 또는 손절 수익률 도달 시 자동 매도
+**특징**:
+- ✅ 터미널에서 직접 실행
+- ✅ 로그가 콘솔에 실시간 출력
+- ✅ 서버 환경에 적합
+- ✅ SSH 원격 접속 가능
 
-3. **종료**
-   - `Ctrl + C`로 안전하게 종료
+#### 방법 2: GUI 실행 (웹 대시보드)
+
+```bash
+# Streamlit 웹 대시보드 실행
+streamlit run gui/app.py
+```
+
+**특징**:
+- ✅ 웹 브라우저에서 모니터링
+- ✅ 실시간 로그 확인
+- ✅ 매매 기록 시각화
+- ✅ 비전문가도 쉽게 사용
+
+**접속**: 브라우저에서 `http://localhost:8501` 접속
+
+> 💡 **원격 접속**: 다른 컴퓨터에서 접속하려면
+> ```bash
+> streamlit run gui/app.py --server.address=0.0.0.0
+> # 접속: http://서버IP:8501
+> ```
+
+---
+
+### 📋 프로그램 동작 흐름
+
+1. **Telegram 채널 연결 및 로그인**
+2. **최근 메시지 조회** (로그 확인용)
+3. **실시간 메시지 모니터링 시작**
+4. **"Ai 종목포착 시그널" 감지 시 자동 매수**
+5. **WebSocket 실시간 시세 모니터링**
+6. **목표 수익률/손절 수익률 도달 시 자동 매도**
+
+### ⏹️ 종료
+
+- **CLI**: `Ctrl + C`로 안전하게 종료
+- **GUI**: 브라우저 탭만 닫으면 됨 (백그라운드 계속 실행)
+  - 완전 종료: 터미널에서 `Ctrl + C`
+
+---
+
+### 🔄 업데이트 방법
+
+#### Git Pull 업데이트
+
+```bash
+# 최신 코드 가져오기
+git pull origin master
+
+# 의존성 업데이트 (새 패키지 추가된 경우)
+uv sync
+
+# 환경 변수 확인 (.env.example 참고)
+# 새로운 설정이 추가되었을 수 있음
+```
+
+#### Portable 패키지 업데이트
+
+1. **설정 백업**
+   ```
+   data/ 폴더 전체를 USB나 다른 위치에 복사
+   (설정 파일 및 Telegram 세션 포함)
+   ```
+
+2. **새 버전 다운로드**
+   ```
+   stock_trading_v1.7.0_portable.zip 다운로드
+   ```
+
+3. **설정 복원**
+   ```
+   새 버전 압축 해제 → 백업한 data/ 폴더 복사
+   ```
+
+4. **실행**
+   ```
+   자동매매 시작.lnk 더블클릭
+   ```
+
+> ⚠️ **주의**: `data/` 폴더를 백업하지 않으면 재설정이 필요합니다!
 
 ## 📊 시스템 아키텍처
 
@@ -263,14 +375,38 @@ python auto_trading.py
 ```
 stock_tel/
 ├── auto_trading.py              # 메인 자동매매 시스템 (Telegram 버전)
-├── auto_trading_no_telegram.py  # 브라우저 기반 자동매매 시스템
+├── auto_trading_no_telegram.py  # 브라우저 기반 자동매매 시스템 (레거시)
 ├── kiwoom_order.py              # REST API 주문 처리
 ├── kiwoom_websocket.py          # WebSocket 실시간 시세
-├── test_stop_loss_delay.py      # 손절 지연 기능 시뮬레이션 테스트
+├── config.py                    # 설정 관리
+├── trading_system_base.py       # 자동매매 기본 클래스
+├── test_stop_loss_delay.py      # 손절 지연 기능 테스트
+│
+├── gui/                         # Streamlit 웹 대시보드 (v1.6.0+)
+│   ├── app.py                   # 메인 대시보드 앱
+│   └── utils/
+│       ├── telegram_auth.py     # Telegram 재인증 관리
+│       └── process_monitor.py   # 프로세스 모니터링
+│
+├── scripts/                     # 유틸리티 스크립트
+│   └── telegram_auth.py         # CLI Telegram 인증
+│
+├── portable/                    # Portable 패키지 빌드 (v1.6.0+)
+│   ├── build_portable.ps1       # PowerShell 빌드 스크립트
+│   ├── build.bat                # 배치 빌드 스크립트 (영문)
+│   ├── setup_gui.py             # Tkinter 설정 GUI
+│   ├── launcher.py              # 통합 런처
+│   ├── setup_gui.spec           # PyInstaller 설정
+│   ├── scripts/                 # 실행 배치 스크립트
+│   ├── templates/               # 템플릿 파일
+│   ├── docs/                    # 배포 문서
+│   ├── QUICK_START.md           # 빠른 시작 가이드
+│   └── README.md                # Portable 패키지 설명
+│
 ├── .env                         # 환경 변수 (직접 작성 필요)
 ├── .env.example                 # 환경 변수 예시 파일
 ├── pyproject.toml               # 프로젝트 설정 및 의존성
-├── README.md                    # 본 문서
+├── README.md                    # 본 문서 (사용자 가이드)
 ├── CLAUDE.md                    # 개발자 문서
 │
 ├── daily_trading_lock.json      # 일일 매수 이력 (자동 생성)
