@@ -1,0 +1,183 @@
+"""
+Telegram API 초기 설정 스크립트
+
+Telegram 클라이언트 세션을 생성하고 인증을 완료합니다.
+이 스크립트는 최초 1회만 실행하면 됩니다.
+"""
+
+import asyncio
+import os
+from dotenv import load_dotenv
+from telethon import TelegramClient
+
+# 환경변수 로드
+load_dotenv()
+
+# Telegram API 설정
+API_ID = int(os.getenv("API_ID"))
+API_HASH = os.getenv("API_HASH")
+SESSION_NAME = os.getenv("SESSION_NAME", "channel_copier")
+
+
+async def setup_telegram():
+    """Telegram 클라이언트 초기 설정"""
+    print("=" * 80)
+    print("🚀 Telegram API 초기 설정 시작")
+    print("=" * 80)
+
+    # 세션 파일이 이미 있는지 확인
+    session_file = f"{SESSION_NAME}.session"
+    if os.path.exists(session_file):
+        print(f"⚠️  세션 파일이 이미 존재합니다: {session_file}")
+        response = input("기존 세션을 삭제하고 새로 설정하시겠습니까? (y/n): ")
+        if response.lower() != 'y':
+            print("❌ 설정을 취소합니다.")
+            return
+        os.remove(session_file)
+        print(f"✅ 기존 세션 파일 삭제: {session_file}")
+
+    print()
+    print("📱 Telegram 로그인을 시작합니다...")
+    print("💡 전화번호는 국제 형식으로 입력하세요 (예: +821012345678)")
+    print()
+
+    # Telegram 클라이언트 생성
+    client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
+
+    try:
+        # 클라이언트 시작 (전화번호 및 인증 코드 입력)
+        await client.start()
+
+        # 로그인 성공 확인
+        me = await client.get_me()
+        print()
+        print("=" * 80)
+        print("✅ Telegram 로그인 성공!")
+        print(f"👤 사용자: {me.first_name} (@{me.username})")
+        print(f"📞 전화번호: {me.phone}")
+        print(f"💾 세션 파일: {session_file}")
+        print("=" * 80)
+        print()
+        print("💡 이제 auto_trading.py를 실행할 수 있습니다.")
+        print()
+
+    except Exception as e:
+        print()
+        print("=" * 80)
+        print(f"❌ Telegram 설정 실패: {e}")
+        print("=" * 80)
+        print()
+        print("💡 .env 파일의 API_ID와 API_HASH를 확인하세요.")
+        print("💡 https://my.telegram.org/auth 에서 발급받을 수 있습니다.")
+        print()
+
+    finally:
+        # 클라이언트 종료
+        await client.disconnect()
+        print("✅ 클라이언트 연결 종료")
+
+
+async def test_telegram_connection():
+    """Telegram 연결 테스트"""
+    print("=" * 80)
+    print("🔍 Telegram 연결 테스트 시작")
+    print("=" * 80)
+
+    # 세션 파일 확인
+    session_file = f"{SESSION_NAME}.session"
+    if not os.path.exists(session_file):
+        print(f"❌ 세션 파일이 없습니다: {session_file}")
+        print("💡 먼저 Telegram 설정을 완료하세요.")
+        return
+
+    print(f"✅ 세션 파일 확인: {session_file}")
+    print()
+
+    # Telegram 클라이언트 생성
+    client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
+
+    try:
+        # 클라이언트 시작
+        await client.start()
+
+        # 로그인 확인
+        me = await client.get_me()
+        print("✅ Telegram 로그인 성공!")
+        print(f"👤 사용자: {me.first_name} (@{me.username})")
+        print(f"📞 전화번호: {me.phone}")
+        print()
+
+        # SOURCE_CHANNEL 확인
+        source_channel = os.getenv("SOURCE_CHANNEL")
+        if source_channel:
+            print(f"📥 SOURCE_CHANNEL 확인 중: {source_channel}")
+            try:
+                entity = await client.get_entity(source_channel)
+                print(f"   ✅ 채널명: {getattr(entity, 'title', 'N/A')}")
+                print(f"   ✅ 채널 ID: {entity.id}")
+                print(f"   ✅ Username: @{getattr(entity, 'username', 'N/A')}")
+            except Exception as e:
+                print(f"   ❌ 채널 조회 실패: {e}")
+                print(f"   💡 SOURCE_CHANNEL 설정을 확인하세요.")
+
+        # TARGET_CHANNEL 확인
+        target_channel = os.getenv("TARGET_CHANNEL")
+        if target_channel:
+            print()
+            print(f"📤 TARGET_CHANNEL 확인 중: {target_channel}")
+            try:
+                entity = await client.get_entity(target_channel)
+                print(f"   ✅ 채널명: {getattr(entity, 'title', 'N/A')}")
+                print(f"   ✅ 채널 ID: {entity.id}")
+                print(f"   ✅ Username: @{getattr(entity, 'username', 'N/A')}")
+            except Exception as e:
+                print(f"   ❌ 채널 조회 실패: {e}")
+                print(f"   💡 TARGET_CHANNEL 설정을 확인하세요.")
+
+        print()
+        print("=" * 80)
+        print("✅ Telegram 연결 테스트 완료!")
+        print("=" * 80)
+
+    except Exception as e:
+        print()
+        print("=" * 80)
+        print(f"❌ Telegram 연결 테스트 실패: {e}")
+        print("=" * 80)
+
+    finally:
+        # 클라이언트 종료
+        await client.disconnect()
+
+
+def main():
+    """메인 함수"""
+    print()
+    print("=" * 80)
+    print("🔧 Telegram API 설정 도구")
+    print("=" * 80)
+    print()
+    print("1. Telegram 초기 설정 (전화번호 인증)")
+    print("2. Telegram 연결 테스트")
+    print("3. 종료")
+    print()
+
+    choice = input("선택 (1-3): ").strip()
+
+    if choice == "1":
+        asyncio.run(setup_telegram())
+    elif choice == "2":
+        asyncio.run(test_telegram_connection())
+    elif choice == "3":
+        print("✅ 프로그램을 종료합니다.")
+    else:
+        print("❌ 잘못된 선택입니다.")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n\n❌ 사용자에 의해 중단되었습니다.")
+    except Exception as e:
+        print(f"\n\n❌ 오류 발생: {e}")

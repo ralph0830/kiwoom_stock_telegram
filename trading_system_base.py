@@ -639,17 +639,102 @@ class TradingSystemBase(ABC):
             if buy_time and self.config.stop_loss_delay_minutes > 0:
                 elapsed_minutes = (datetime.now() - buy_time).total_seconds() / 60
                 if elapsed_minutes < self.config.stop_loss_delay_minutes:
+                    # 손절 지연 시간 이내면 손절하지 않음
                     if self.config.debug_mode:
-                        logger.debug(f"⏱️  손절 지연: 매수 후 {elapsed_minutes:.1f}분 경과")
+                        logger.debug(f"⏱️  손절 지연: 매수 후 {elapsed_minutes:.1f}분 경과 (설정: {self.config.stop_loss_delay_minutes}분 이후부터 손절)")
                     return
 
-            # 캐시된 평균단가로 즉시 손절 실행
+            # 캐시된 평균단가로 즉시 손절 실행 (180ms 절약)
             await self.execute_stop_loss(current_price, profit_rate)
             return
 
         # 목표 수익률 도달 확인
         if profit_rate >= self.buy_info["target_profit_rate"] and not self.sell_executed:
+            # 캐시된 평균단가로 즉시 익절 실행 (180ms 절약)
             await self.execute_auto_sell(current_price, profit_rate)
+
+    async def cancel_outstanding_buy_orders(self):
+        """
+        미체결 매수 주문 취소 (부분 체결 후 익절/손절 시 안전장치)
+
+        부분 체결 후 빠르게 익절/손절하는 경우, 남아있는 미체결 매수 주문을 자동으로 취소합니다.
+        이를 통해 의도치 않은 추가 매수를 방지합니다.
+
+        Returns:
+            성공 여부 (True: 취소 완료 또는 미체결 없음, False: 취소 실패)
+        """
+        # buy_order_no가 저장되어 있는지 확인 (부분 체결 시에만 저장됨)
+        buy_order_no = self.buy_info.get("buy_order_no")
+
+        if not buy_order_no:
+            # 미체결 매수 주문이 없음 (100% 체결 또는 시장가 매수)
+            return True
+
+        stock_code = self.buy_info.get("stock_code")
+
+        logger.info("=" * 80)
+        logger.info("🔍 미체결 매수 주문 확인 중...")
+
+        try:
+            # 미체결 주문 조회
+            outstanding_result = self.kiwoom_api.get_outstanding_orders()
+
+            if not outstanding_result.get("success"):
+                logger.warning("⚠️ 미체결 주문 조회 실패")
+                return False
+
+            outstanding_orders = outstanding_result.get("outstanding_orders", [])
+
+            # 해당 주문번호의 미체결 주문 찾기
+            target_order = None
+            for order in outstanding_orders:
+                if order.get("ord_no") == buy_order_no:
+                    target_order = order
+                    break
+
+            if not target_order:
+                logger.info("✅ 미체결 매수 주문이 없습니다 (이미 체결되었거나 취소됨)")
+                # 주문번호 제거
+                self.buy_info.pop("buy_order_no", None)
+                return True
+
+            # 미체결 수량 확인
+            remaining_qty = int(target_order.get("rmndr_qty") or 0)
+
+            if remaining_qty <= 0:
+                logger.info("✅ 미체결 매수 주문이 없습니다")
+                self.buy_info.pop("buy_order_no", None)
+                return True
+
+            # 미체결 주문 취소
+            logger.warning(f"⚠️ 미체결 매수 주문 발견!")
+            logger.warning(f"   주문번호: {buy_order_no}")
+            logger.warning(f"   미체결 수량: {remaining_qty}주")
+            logger.warning(f"🚨 안전장치 발동: 의도치 않은 추가 매수 방지를 위해 미체결 주문을 취소합니다")
+
+            cancel_result = self.kiwoom_api.cancel_order(
+                order_no=buy_order_no,
+                stock_code=stock_code,
+                quantity=remaining_qty
+            )
+
+            if cancel_result.get("success"):
+                logger.info("✅ 미체결 매수 주문 취소 완료!")
+                logger.info(f"   취소 수량: {remaining_qty}주")
+                logger.info("💡 익절/손절 완료 후 추가 매수가 방지되었습니다")
+                # 주문번호 제거
+                self.buy_info.pop("buy_order_no", None)
+                logger.info("=" * 80)
+                return True
+            else:
+                logger.error(f"❌ 미체결 주문 취소 실패: {cancel_result.get('message', '알 수 없는 오류')}")
+                logger.info("=" * 80)
+                return False
+
+        except Exception as e:
+            logger.error(f"❌ 미체결 매수 주문 취소 중 오류: {e}")
+            logger.info("=" * 80)
+            return False
 
     # ========================================
     # 자동 매도 (익절)
@@ -657,12 +742,12 @@ class TradingSystemBase(ABC):
 
     async def execute_auto_sell(self, current_price: int, profit_rate: float):
         """자동 매도 실행 (100% 전량 매도)"""
-        # 중복 매도 방지
+        # 중복 매도 방지 (재진입 방지)
         if self.sell_executed:
             logger.warning("⚠️ 이미 매도 주문을 실행했습니다. 중복 실행 방지")
             return
 
-        self.sell_executed = True  # 즉시 플래그 설정
+        self.sell_executed = True  # 즉시 플래그 설정 (중복 방지)
 
         logger.info("=" * 60)
         logger.info(f"🎯 목표 수익률 {self.buy_info['target_profit_rate']*100:.2f}% 도달! 자동 매도를 시작합니다")
@@ -671,7 +756,7 @@ class TradingSystemBase(ABC):
         logger.info(f"수익률: {profit_rate*100:.2f}%")
         logger.info("=" * 60)
 
-        # 캐시된 보유 정보 사용
+        # 캐시된 보유 정보 사용 (180ms 절약, 수동 매수 시 재시작 필요)
         actual_quantity = self.buy_info["quantity"]
         actual_buy_price = self.buy_info["buy_price"]
 
@@ -682,11 +767,11 @@ class TradingSystemBase(ABC):
             logger.error("❌ 매도할 수량이 0입니다. 매도를 중단합니다.")
             return
 
-        # 매도가 계산 (목표 수익률 기준, OrderExecutor 사용)
-        sell_price = self.order_executor.calculate_sell_price(
-            buy_price=actual_buy_price,
-            profit_rate=profit_rate
-        )
+        # 매도가 계산 (현재가에서 한 틱 아래)
+        from kiwoom_order import calculate_sell_price
+        sell_price = calculate_sell_price(current_price)
+
+        logger.info(f"💰 매도 주문가: {sell_price:,}원 (현재가에서 한 틱 아래)")
 
         try:
             # 지정가 매도 주문 (OrderExecutor 사용)
@@ -715,6 +800,9 @@ class TradingSystemBase(ABC):
 
                 if is_executed:
                     logger.info("✅ 자동 매도 완료!")
+
+                    # 🚨 안전장치: 부분 체결 후 익절 시 미체결 매수 주문 취소
+                    await self.cancel_outstanding_buy_orders()
 
                     # WebSocket 모니터링 중지
                     if self.websocket:
@@ -841,7 +929,7 @@ class TradingSystemBase(ABC):
         logger.info(f"손실률: {profit_rate*100:.2f}%")
         logger.info("=" * 60)
 
-        # 캐시된 보유 정보 사용
+        # 캐시된 보유 정보 사용 (180ms 절약, 수동 매수 시 재시작 필요)
         actual_quantity = self.buy_info["quantity"]
         actual_buy_price = self.buy_info["buy_price"]
 
@@ -864,6 +952,9 @@ class TradingSystemBase(ABC):
 
             if sell_result and sell_result.get("success"):
                 logger.info("✅ 손절 매도 완료!")
+
+                # 🚨 안전장치: 부분 체결 후 손절 시 미체결 매수 주문 취소
+                await self.cancel_outstanding_buy_orders()
 
                 # WebSocket 모니터링 중지
                 if self.websocket:
@@ -892,7 +983,7 @@ class TradingSystemBase(ABC):
             logger.warning("⚠️ 이미 매도 주문을 실행했습니다. 중복 실행 방지")
             return
 
-        self.sell_executed = True
+        self.sell_executed = True  # 즉시 플래그 설정 (중복 방지)
 
         logger.info("=" * 80)
         logger.info(f"⏰ 강제 청산 시간 도달! ({self.config.daily_force_sell_time})")
@@ -926,7 +1017,7 @@ class TradingSystemBase(ABC):
                     if cancel_result.get("success"):
                         logger.info(f"  ✅ 주문 취소 완료: {order_no}")
                     else:
-                        logger.error(f"  ❌ 주문 취소 실패: {order_no}")
+                        logger.error(f"  ❌ 주문 취소 실패: {order_no} - {cancel_result.get('message', '알 수 없는 오류')}")
 
                 logger.info("✅ 미체결 주문 취소 처리 완료")
             else:
@@ -936,7 +1027,7 @@ class TradingSystemBase(ABC):
 
         logger.info("=" * 80)
 
-        # 캐시된 보유 정보 사용
+        # 캐시된 보유 정보 사용 (180ms 절약, 수동 매수 시 재시작 필요)
         actual_quantity = self.buy_info["quantity"]
         actual_buy_price = self.buy_info["buy_price"]
 
