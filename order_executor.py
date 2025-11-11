@@ -527,7 +527,7 @@ class OrderExecutor:
         self,
         current_price: int,
         max_investment: int,
-        safety_margin: float = 0.02
+        safety_margin: float = 0.0
     ) -> int:
         """
         매수 수량 계산
@@ -535,7 +535,7 @@ class OrderExecutor:
         Args:
             current_price: 현재가
             max_investment: 최대 투자금액
-            safety_margin: 안전 마진 (기본 2%)
+            safety_margin: 안전 마진 (기본 0%, 사용 안 함)
 
         Returns:
             int: 매수 수량
@@ -544,17 +544,14 @@ class OrderExecutor:
             logger.error(f"❌ 현재가가 0 이하입니다: {current_price}")
             return 0
 
-        # 안전 마진 적용 (시장가 체결 시 가격 상승 대비)
-        adjusted_investment = int(max_investment * (1 - safety_margin))
-        quantity = adjusted_investment // current_price
+        # 안전 마진 없음 (최대 투자금액으로 최대한 매수)
+        quantity = max_investment // current_price
 
         logger.info(f"💰 매수 수량 계산:")
         logger.info(f"   최대 투자금액: {max_investment:,}원")
-        logger.info(f"   안전 마진: {safety_margin * 100}%")
-        logger.info(f"   조정 투자금액: {adjusted_investment:,}원")
         logger.info(f"   현재가: {current_price:,}원")
         logger.info(f"   매수 수량: {quantity}주")
-        logger.info(f"   실제 투자금액: {current_price * quantity:,}원")
+        logger.info(f"   예상 투자금액: {current_price * quantity:,}원")
 
         return quantity
 

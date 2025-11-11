@@ -102,6 +102,7 @@ ENABLE_SELL_MONITORING=true  # 자동 매도 모니터링 활성화 (true: 활�
 # 손절 설정
 ENABLE_STOP_LOSS=true        # 손절 모니터링 활성화 (true: 활성화, false: 비활성화)
 STOP_LOSS_RATE=-2.5          # 손절 수익률 (%) - 기본값: -2.5%
+STOP_LOSS_DELAY_MINUTES=1    # 손절 지연 시간 (분) - 매수 후 N분 이후부터 손절 가능 (기본값: 1분, 0=즉시 손절)
 
 # 일일 강제 청산 설정
 ENABLE_DAILY_FORCE_SELL=true # 일일 강제 청산 활성화 (true: 활성화, false: 비활성화)

@@ -108,7 +108,8 @@ class TelegramTradingSystem(TradingSystemBase):
                 return None
 
             # 종목명과 종목코드 추출
-            stock_pattern = r'(?:포착\s*)?종목명\s*[:：]\s*([가-힣a-zA-Z0-9＆&\s]+?)\s*\((\d{6})\)'
+            # 종목명이 비어있어도 종목코드만 있으면 매수 가능하도록 *? 사용 (0개 이상)
+            stock_pattern = r'(?:포착\s*)?종목명\s*[:：]\s*([가-힣a-zA-Z0-9＆&\s]*?)\s*\((\d{6})\)'
             stock_match = re.search(stock_pattern, message_text)
 
             if not stock_match:
@@ -117,6 +118,11 @@ class TelegramTradingSystem(TradingSystemBase):
 
             stock_name = stock_match.group(1).strip()
             stock_code = stock_match.group(2).strip()
+
+            # 종목명이 비어있으면 종목코드를 종목명으로 사용
+            if not stock_name:
+                stock_name = stock_code
+                logger.warning(f"⚠️ 종목명이 비어있어 종목코드({stock_code})를 종목명으로 사용합니다")
 
             # 적정 매수가 추출 (선택)
             target_price = None

@@ -143,16 +143,6 @@ class TradingSystemBase(ABC):
             current_price = price_result["current_price"]
             logger.info(f"💰 현재가: {current_price:,}원")
 
-        # 매수 수량 계산 (OrderExecutor 사용)
-        quantity = self.order_executor.calculate_buy_quantity(
-            current_price=current_price,
-            max_investment=self.max_investment
-        )
-
-        if quantity <= 0:
-            logger.error("❌ 매수 가능 수량이 0입니다.")
-            return None
-
         try:
             # Access Token 발급
             self.kiwoom_api.get_access_token()
@@ -170,10 +160,19 @@ class TradingSystemBase(ABC):
                 tick_size = get_tick_size(current_price)
                 order_price = current_price + tick_size
 
+                # 지정가 기준으로 수량 계산 (안전 마진 없음)
+                quantity = self.max_investment // order_price
+
+                if quantity <= 0:
+                    logger.error("❌ 매수 가능 수량이 0입니다.")
+                    return None
+
                 logger.info(f"📊 매수 타입: 지정가 (한 틱 위)")
                 logger.info(f"   현재가: {current_price:,}원")
                 logger.info(f"   틱 크기: {tick_size}원")
                 logger.info(f"   주문가: {order_price:,}원")
+                logger.info(f"   매수 수량: {quantity}주 (지정가 기준)")
+                logger.info(f"   예상 투자금액: {order_price * quantity:,}원")
 
                 # 지정가 매수 주문
                 order_result = await self.order_executor.execute_limit_buy(
@@ -267,9 +266,18 @@ class TradingSystemBase(ABC):
 
             else:  # market (기본값)
                 # ========================================
-                # 시장가 매수 (기존 로직 유지)
+                # 시장가 매수
                 # ========================================
+                # 현재가 기준으로 수량 계산 (안전 마진 없음)
+                quantity = self.max_investment // current_price
+
+                if quantity <= 0:
+                    logger.error("❌ 매수 가능 수량이 0입니다.")
+                    return None
+
                 logger.info("📊 매수 타입: 시장가 (즉시 체결)")
+                logger.info(f"   매수 수량: {quantity}주 (현재가 기준)")
+                logger.info(f"   예상 투자금액: {current_price * quantity:,}원")
 
                 order_result = await self.order_executor.execute_market_buy(
                     stock_code=stock_code,
