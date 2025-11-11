@@ -60,7 +60,7 @@ class TradingSystemBase(ABC):
         self.ws_receive_task: Optional[asyncio.Task] = None
 
         # 주문 실행기 초기화 (OrderExecutor 사용)
-        self.order_executor = OrderExecutor(self.kiwoom_api)
+        self.order_executor = OrderExecutor(self.kiwoom_api, self.account_no)
 
         # 가격 모니터 초기화 (나중에 WebSocket 설정 후 생성)
         self.price_monitor: Optional[PriceMonitor] = None
@@ -1186,6 +1186,7 @@ class TradingSystemBase(ABC):
             f"[{profit_color}]{profit_sign}{(current_price - buy_price) * self.buy_info['quantity']:,}원[/{profit_color}]"
         )
         table.add_row("보유수량", f"{self.buy_info['quantity']:,}주")
+        table.add_row("총 투자금액", f"{buy_price * self.buy_info['quantity']:,}원")
         table.add_row("업데이트", datetime.now().strftime("%H:%M:%S"))
 
         return table

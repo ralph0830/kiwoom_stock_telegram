@@ -21,12 +21,14 @@ logger = logging.getLogger(__name__)
 class OrderExecutor:
     """주문 실행 클래스"""
 
-    def __init__(self, api: KiwoomOrderAPI):
+    def __init__(self, api: KiwoomOrderAPI, account_no: str):
         """
         Args:
             api: KiwoomOrderAPI 인스턴스
+            account_no: 계좌번호
         """
         self.api = api
+        self.account_no = account_no
 
     async def execute_market_buy(
         self,
@@ -66,7 +68,8 @@ class OrderExecutor:
         # 시장가 매수 주문
         result = self.api.place_market_buy_order(
             stock_code=stock_code,
-            quantity=quantity
+            quantity=quantity,
+            account_no=self.account_no
         )
 
         if not result.get("success"):
@@ -134,7 +137,8 @@ class OrderExecutor:
         result = self.api.place_limit_buy_order(
             stock_code=stock_code,
             quantity=quantity,
-            price=order_price
+            price=order_price,
+            account_no=self.account_no
         )
 
         if not result.get("success"):
@@ -200,7 +204,8 @@ class OrderExecutor:
         result = self.api.place_limit_sell_order(
             stock_code=stock_code,
             quantity=quantity,
-            price=sell_price
+            price=sell_price,
+            account_no=self.account_no
         )
 
         if not result.get("success"):
@@ -267,7 +272,8 @@ class OrderExecutor:
         # 시장가 매도 주문
         result = self.api.place_market_sell_order(
             stock_code=stock_code,
-            quantity=quantity
+            quantity=quantity,
+            account_no=self.account_no
         )
 
         if not result.get("success"):

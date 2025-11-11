@@ -50,7 +50,7 @@ async def test_order_executor():
     })
 
     # OrderExecutor 생성
-    executor = OrderExecutor(mock_api)
+    executor = OrderExecutor(mock_api, "12345678-01")
 
     # 테스트 1: 매수 수량 계산
     console.print("\n[bold yellow]📊 테스트 1: 매수 수량 계산")
@@ -309,7 +309,7 @@ async def test_integration():
     from kiwoom_order import KiwoomOrderAPI
 
     mock_api = Mock(spec=KiwoomOrderAPI)
-    executor = OrderExecutor(mock_api)
+    executor = OrderExecutor(mock_api, "12345678-01")
 
     # 매도가 계산
     sell_price = executor.calculate_sell_price(buy_price, target_profit_rate)

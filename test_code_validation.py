@@ -105,7 +105,7 @@ def test_order_executor():
 
         # Mock API
         mock_api = Mock(spec=KiwoomOrderAPI)
-        executor = OrderExecutor(mock_api)
+        executor = OrderExecutor(mock_api, "12345678-01")
 
         # 테스트 케이스
         tests = []
