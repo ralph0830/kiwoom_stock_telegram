@@ -9,7 +9,7 @@ Telegram 채널에서 매수 신호를 실시간으로 감지하여 자동 매�
 
 ### 주요 기능
 - 📱 **Telegram 실시간 감시**: Telegram 채널에서 "Ai 종목포착 시그널" 메시지 실시간 감지
-- 📤 **메시지 자동 복사**: SOURCE 채널 → TARGET 채널로 모든 메시지 자동 전달
+- 📤 **메시지 자동 복사**: SOURCE 채널 → TARGET 채널로 모든 메시지 자동 전달 (TARGET_CHANNEL 공란 시 비활성화 가능)
 - 💰 **자동 매수** (v1.6.0):
   - 시장가 즉시 매수: 0.8초 빠른 체결, 100% 체결 보장
   - 지정가 매수 (한 틱 위): 유리한 가격 진입, 슬리피지 최소화
@@ -125,11 +125,16 @@ API_HASH=abcdef1234567890abcdef1234567890
 SESSION_NAME=channel_copier
 
 # Telegram 채널 설정
-SOURCE_CHANNEL=https://t.me/your_source_channel  # 매수 신호 채널
-TARGET_CHANNEL=@your_target_channel              # 알림 전송 채널 (선택)
+SOURCE_CHANNEL=https://t.me/your_source_channel  # 매수 신호 채널 (필수)
+TARGET_CHANNEL=@your_target_channel              # 알림 전송 채널 (선택, 공란 시 메시지 복사 비활성화)
 ```
 
 **중요**: `.env` 파일은 `.gitignore`에 포함되어야 하며, 실제 키 값은 절대 커밋하지 마세요.
+
+**TARGET_CHANNEL 비활성화**:
+- `TARGET_CHANNEL`을 공란으로 설정하면 메시지 복사 기능만 비활성화됩니다
+- SOURCE_CHANNEL은 여전히 매수 신호 감지에 사용됩니다
+- 매수/매도 모니터링은 정상적으로 작동합니다
 
 ### 실시간 체결 정보 검증 (ENABLE_LAZY_VERIFICATION)
 

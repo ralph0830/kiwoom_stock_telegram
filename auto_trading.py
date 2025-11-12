@@ -158,8 +158,8 @@ class TelegramTradingSystem(TradingSystemBase):
         logger.info("🔔 이벤트 핸들러 호출됨! (새 메시지 감지)")
 
         try:
-            # 0. 먼저 모든 메시지를 TARGET 채널로 복사
-            if self.target_channel:
+            # 0. TARGET_CHANNEL이 설정되어 있으면 모든 메시지를 TARGET 채널로 복사
+            if self.target_channel and self.target_channel.strip():
                 try:
                     if msg.media:
                         await self.telegram_client.send_file(
@@ -175,6 +175,8 @@ class TelegramTradingSystem(TradingSystemBase):
                         logger.info("ℹ️ 복사할 내용이 없는 메시지입니다")
                 except Exception as e:
                     logger.error(f"❌ 메시지 복사 실패: {e}")
+            else:
+                logger.debug("ℹ️ TARGET_CHANNEL이 설정되지 않아 메시지 복사를 건너뜁니다")
 
             # 1. 텍스트 메시지가 아니면 매수 로직 스킵
             if not msg.text:
@@ -318,7 +320,10 @@ class TelegramTradingSystem(TradingSystemBase):
             has_holdings = trading_info is not None
 
             if has_holdings:
-                logger.info("✅ 보유 종목이 있습니다. 매도 모니터링과 메시지 복사를 시작합니다.")
+                if self.target_channel and self.target_channel.strip():
+                    logger.info("✅ 보유 종목이 있습니다. 매도 모니터링과 메시지 복사를 시작합니다.")
+                else:
+                    logger.info("✅ 보유 종목이 있습니다. 매도 모니터링을 시작합니다.")
                 logger.info("📊 브라우저 없이 WebSocket 매도 모니터링을 진행합니다.")
                 self.order_executed = True
 
@@ -367,8 +372,10 @@ class TelegramTradingSystem(TradingSystemBase):
             me = await self.telegram_client.get_me()
             logger.info(f"✅ Telegram 로그인: {me.first_name} (@{me.username})")
             logger.info(f"📥 매수 신호 모니터링 채널 (SOURCE_CHANNEL): {self.source_channel}")
-            if self.target_channel:
+            if self.target_channel and self.target_channel.strip():
                 logger.info(f"📤 알림 전송 채널 (TARGET_CHANNEL): {self.target_channel}")
+            else:
+                logger.info("📤 알림 전송 채널 (TARGET_CHANNEL): 비활성화 (메시지 복사 안함)")
             logger.info(f"💰 최대 투자금액: {self.max_investment:,}원")
             logger.info(f"⏰ 매수 가능 시간: {self.config.buy_start_time} ~ {self.config.buy_end_time}")
             logger.info("=" * 80)
@@ -422,7 +429,10 @@ class TelegramTradingSystem(TradingSystemBase):
 
             # 보유 종목이 있으면 WebSocket과 Telegram을 병렬 실행
             if has_holdings and self.config.enable_sell_monitoring:
-                logger.info("🔄 WebSocket 시세 모니터링과 Telegram 메시지 복사를 동시에 실행합니다.")
+                if self.target_channel and self.target_channel.strip():
+                    logger.info("🔄 WebSocket 시세 모니터링과 Telegram 메시지 복사를 동시에 실행합니다.")
+                else:
+                    logger.info("🔄 WebSocket 시세 모니터링과 Telegram 신호 감지를 동시에 실행합니다.")
 
                 try:
                     await asyncio.gather(
