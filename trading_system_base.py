@@ -774,13 +774,12 @@ class TradingSystemBase(ABC):
         logger.info(f"💰 매도 주문가: {sell_price:,}원 (현재가에서 한 틱 아래)")
 
         try:
-            # 지정가 매도 주문 (OrderExecutor 사용)
-            sell_result = await self.order_executor.execute_limit_sell(
+            # 지정가 매도 주문 (실제 보유 수량으로)
+            sell_result = self.kiwoom_api.place_limit_sell_order(
                 stock_code=self.buy_info["stock_code"],
-                stock_name=self.buy_info["stock_name"],
-                quantity=actual_quantity,
-                sell_price=sell_price,
-                reason="익절"
+                quantity=actual_quantity,  # 실제 보유 수량
+                price=sell_price,
+                account_no=self.account_no
             )
 
             if sell_result and sell_result.get("success"):
@@ -811,9 +810,7 @@ class TradingSystemBase(ABC):
                             self.ws_receive_task.cancel()
 
                     # 매도 결과 저장
-                    await self.save_sell_result_ws(
-                        current_price, sell_result, profit_rate, actual_quantity, actual_buy_price
-                    )
+                    await self.save_sell_result_ws(current_price, sell_result, profit_rate, actual_quantity, actual_buy_price)
                 else:
                     # 미체결 시 처리
                     await self.handle_outstanding_order(
@@ -823,11 +820,11 @@ class TradingSystemBase(ABC):
                     )
             else:
                 logger.error("❌ 자동 매도 실패")
-                self.sell_executed = False
+                self.sell_executed = False  # 주문 실패 시 플래그 해제 (재시도 가능)
 
         except Exception as e:
             logger.error(f"❌ 매도 주문 실행 중 오류: {e}")
-            self.sell_executed = False
+            self.sell_executed = False  # 오류 시 플래그 해제
 
     async def wait_for_sell_execution(
         self,
@@ -936,18 +933,17 @@ class TradingSystemBase(ABC):
         logger.info(f"💰 손절 수량: {actual_quantity}주 (캐시 기반 100% 전량)")
         logger.info(f"💰 평균 매입단가: {actual_buy_price:,}원 (캐시 기반)")
 
+        # 매도 수량이 0이면 중단
         if actual_quantity <= 0:
             logger.error("❌ 매도할 수량이 0입니다. 손절을 중단합니다.")
             return
 
         try:
-            # 시장가 매도 주문 (OrderExecutor 사용)
-            sell_result = await self.order_executor.execute_market_sell(
+            # 시장가 매도 주문 (즉시 체결)
+            sell_result = self.kiwoom_api.place_market_sell_order(
                 stock_code=self.buy_info["stock_code"],
-                stock_name=self.buy_info["stock_name"],
                 quantity=actual_quantity,
-                current_price=current_price,
-                reason="손절"
+                account_no=self.account_no
             )
 
             if sell_result and sell_result.get("success"):
@@ -963,9 +959,7 @@ class TradingSystemBase(ABC):
                         self.ws_receive_task.cancel()
 
                 # 손절 결과 저장
-                await self.save_stop_loss_result(
-                    current_price, sell_result, profit_rate, actual_quantity, actual_buy_price
-                )
+                await self.save_stop_loss_result(current_price, sell_result, profit_rate, actual_quantity, actual_buy_price)
             else:
                 logger.error("❌ 손절 매도 실패")
 
@@ -1035,13 +1029,11 @@ class TradingSystemBase(ABC):
         logger.info(f"💰 평균 매입단가: {actual_buy_price:,}원 (캐시 기반)")
 
         try:
-            # 시장가 매도 주문 (OrderExecutor 사용)
-            sell_result = await self.order_executor.execute_market_sell(
+            # 시장가 매도 주문
+            sell_result = self.kiwoom_api.place_market_sell_order(
                 stock_code=self.buy_info["stock_code"],
-                stock_name=self.buy_info["stock_name"],
                 quantity=actual_quantity,
-                current_price=0,  # 강제 청산 시 정확한 가격은 나중에 조회
-                reason="강제청산"
+                account_no=self.account_no
             )
 
             if sell_result and sell_result.get("success"):
@@ -1064,9 +1056,7 @@ class TradingSystemBase(ABC):
                     profit_rate = (current_price - actual_buy_price) / actual_buy_price
 
                 # 강제 청산 결과 저장
-                await self.save_force_sell_result(
-                    current_price, sell_result, profit_rate, actual_quantity, actual_buy_price
-                )
+                await self.save_force_sell_result(current_price, sell_result, profit_rate, actual_quantity, actual_buy_price)
             else:
                 logger.error("❌ 강제 청산 실패")
 
