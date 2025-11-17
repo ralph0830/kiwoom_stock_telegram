@@ -34,7 +34,6 @@ logger.addHandler(console_handler)
 
 # 파일 핸들러 (안전하게 추가)
 try:
-    import os
     log_dir = os.path.dirname('auto_trading.log')
     if log_dir and not os.path.exists(log_dir):
         os.makedirs(log_dir, exist_ok=True)

@@ -17,11 +17,17 @@ logger = logging.getLogger(__name__)
 class KiwoomWebSocket:
     """키움증권 WebSocket 실시간 시세 클래스"""
 
-    def __init__(self, kiwoom_api: KiwoomOrderAPI, debug_mode: bool = False):
+    def __init__(self, kiwoom_api: KiwoomOrderAPI, debug_mode: bool = False,
+                 ws_ping_interval: Optional[int] = None,
+                 ws_ping_timeout: Optional[int] = None,
+                 ws_recv_timeout: int = 60):
         """
         Args:
             kiwoom_api: 인증된 KiwoomOrderAPI 인스턴스
             debug_mode: 디버그 모드 (상세 로그 출력)
+            ws_ping_interval: WebSocket ping 간격 (초, None=비활성화, 기본값: None)
+            ws_ping_timeout: WebSocket ping 타임아웃 (초, None=비활성화, 기본값: None)
+            ws_recv_timeout: WebSocket 메시지 수신 타임아웃 (초, 기본값: 60)
         """
         self.kiwoom_api = kiwoom_api
         self.ws_url = f"{kiwoom_api.base_url.replace('https', 'wss')}:10000/api/dostk/websocket"
@@ -30,6 +36,11 @@ class KiwoomWebSocket:
         self.callbacks = {}  # 종목코드별 콜백 함수
         self.current_prices = {}  # 종목코드별 현재가 캐시
         self.debug_mode = debug_mode  # 디버그 모드
+
+        # WebSocket 타임아웃 설정 (환경변수로 설정 가능)
+        self.ws_ping_interval = ws_ping_interval
+        self.ws_ping_timeout = ws_ping_timeout
+        self.ws_recv_timeout = ws_recv_timeout
 
     async def connect(self, retry_count: int = 0):
         """
@@ -49,13 +60,14 @@ class KiwoomWebSocket:
             # WebSocket 연결 (인증 헤더 포함)
             # ping_interval=None으로 설정하여 클라이언트 측 자동 ping 비활성화
             # (키움 서버가 ping/pong을 지원하지 않아 40초에 타임아웃 발생 방지)
+            # 환경변수 WS_PING_INTERVAL, WS_PING_TIMEOUT로 설정 가능
             self.websocket = await websockets.connect(
                 self.ws_url,
                 additional_headers={
                     "authorization": f"Bearer {self.kiwoom_api.access_token}"
                 },
-                ping_interval=None,
-                ping_timeout=None
+                ping_interval=self.ws_ping_interval,
+                ping_timeout=self.ws_ping_timeout
             )
 
             logger.info("✅ WebSocket 연결 성공!")
@@ -187,8 +199,8 @@ class KiwoomWebSocket:
                 # 타임아웃을 피하기 위해 무한 루프로 변경
                 while self.is_connected:
                     try:
-                        # 타임아웃 60초로 설정하여 메시지 대기
-                        message = await asyncio.wait_for(self.websocket.recv(), timeout=60.0)
+                        # 타임아웃 설정하여 메시지 대기 (환경변수 WS_RECV_TIMEOUT로 설정 가능, 기본값: 60초)
+                        message = await asyncio.wait_for(self.websocket.recv(), timeout=float(self.ws_recv_timeout))
 
                         data = json.loads(message)
 
@@ -197,13 +209,13 @@ class KiwoomWebSocket:
                             # PING 메시지를 그대로 돌려보내서 연결 유지
                             await self.websocket.send(message)
                             if self.debug_mode:
-                                logger.info("💓 PING 응답 전송 (연결 유지)")
+                                logger.debug("💓 PING 응답 전송 (연결 유지)")
                             continue
 
                         # 실시간 데이터 수신 (trnm이 "REAL"인 경우)
                         if data.get("trnm") == "REAL":
                             if self.debug_mode:
-                                logger.info(f"📡 REAL 메시지 수신: {json.dumps(data, ensure_ascii=False)[:200]}")
+                                logger.debug(f"📡 REAL 메시지 수신: {json.dumps(data, ensure_ascii=False)[:200]}")
                             await self._handle_realtime_data(data)
                         # SYSTEM 메시지 처리 (연결 종료 등)
                         elif data.get("trnm") == "SYSTEM":
@@ -219,7 +231,7 @@ class KiwoomWebSocket:
                         else:
                             # 기타 메시지 로깅 (디버깅용)
                             if self.debug_mode:
-                                logger.info(f"📬 기타 WebSocket 메시지: {json.dumps(data, ensure_ascii=False)[:200]}")
+                                logger.debug(f"📬 기타 WebSocket 메시지: {json.dumps(data, ensure_ascii=False)[:200]}")
 
                     except asyncio.TimeoutError:
                         # 60초 동안 메시지가 없으면 연결 상태 확인

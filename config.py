@@ -55,6 +55,11 @@ class TradingConfig:
     # 디버그 모드
     debug_mode: bool
 
+    # WebSocket 설정
+    ws_ping_interval: Optional[int]  # WebSocket ping 간격 (초, None=비활성화)
+    ws_ping_timeout: Optional[int]   # WebSocket ping 타임아웃 (초, None=비활성화)
+    ws_recv_timeout: int             # WebSocket 메시지 수신 타임아웃 (초)
+
     # Telegram 설정 (선택적)
     api_id: Optional[int] = None
     api_hash: Optional[str] = None
@@ -141,6 +146,11 @@ class TradingConfig:
 
             # 디버그 모드
             debug_mode=os.getenv("DEBUG", "false").lower() == "true",
+
+            # WebSocket 설정
+            ws_ping_interval=None if os.getenv("WS_PING_INTERVAL", "").lower() == "none" else int(os.getenv("WS_PING_INTERVAL", "0")) or None,
+            ws_ping_timeout=None if os.getenv("WS_PING_TIMEOUT", "").lower() == "none" else int(os.getenv("WS_PING_TIMEOUT", "0")) or None,
+            ws_recv_timeout=int(os.getenv("WS_RECV_TIMEOUT", "60")),
 
             # Telegram 설정 (선택적)
             api_id=api_id,

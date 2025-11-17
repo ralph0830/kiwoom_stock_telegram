@@ -173,6 +173,8 @@ class KiwoomOrderAPI:
                 return_code = result.get("return_code")
 
                 # 증거금 부족 에러인지 확인하고 매수 가능 수량 추출
+                # retry_on_insufficient_funds=True: 첫 번째 시도 (증거금 부족 시 재시도 허용)
+                # return_code == 20: 증거금 부족 에러 코드
                 if retry_on_insufficient_funds and return_code == 20:
                     available_qty = self._parse_available_quantity(return_msg)
 
@@ -180,12 +182,15 @@ class KiwoomOrderAPI:
                         logger.warning(f"⚠️ 증거금 부족! 요청 수량: {quantity}주, 매수 가능: {available_qty}주")
                         logger.info(f"🔄 매수 가능 수량({available_qty}주)으로 재시도합니다...")
 
-                        # 매수 가능 수량으로 재귀 호출 (재시도 방지 플래그 전달)
+                        # 🔄 재귀 호출 (1회만 재시도)
+                        # - 매수 가능 수량으로 재주문
+                        # - retry_on_insufficient_funds=False로 설정하여 무한 재귀 방지
+                        # - 두 번째 시도에서도 증거금 부족 시 실패 반환 (재귀 중단)
                         return self.place_market_buy_order(
                             stock_code=stock_code,
                             quantity=available_qty,
                             account_no=account_no,
-                            retry_on_insufficient_funds=False  # 재시도 방지
+                            retry_on_insufficient_funds=False  # 🛡️ 무한 재귀 방지 (최대 1회 재시도)
                         )
 
                 logger.error(f"❌ 시장가 매수 주문 실패")
