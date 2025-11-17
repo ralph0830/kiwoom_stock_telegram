@@ -349,43 +349,187 @@ streamlit run gui/app.py
 
 ### 🔄 업데이트 방법
 
-#### Git Pull 업데이트
+#### 방법 A: Git Pull 업데이트 (개발자 설치 사용자)
+
+새로운 기능이나 버그 수정이 추가되면 다음 방법으로 최신 버전으로 업데이트하세요.
+
+##### 1. 현재 상태 확인
 
 ```bash
-# 최신 코드 가져오기
-git pull origin master
+# 프로젝트 디렉토리로 이동
+cd /path/to/stock_tel
 
-# 의존성 업데이트 (새 패키지 추가된 경우)
-uv sync
-
-# 환경 변수 확인 (.env.example 참고)
-# 새로운 설정이 추가되었을 수 있음
+# 현재 브랜치 및 변경사항 확인
+git status
 ```
 
-#### Portable 패키지 업데이트
+**출력 예시**:
+```
+On branch feature/gui-implementation
+Your branch is behind 'origin/feature/gui-implementation' by 2 commits.
+```
 
-1. **설정 백업**
-   ```
-   data/ 폴더 전체를 USB나 다른 위치에 복사
-   (설정 파일 및 Telegram 세션 포함)
-   ```
+##### 2. 프로그램 종료
 
-2. **새 버전 다운로드**
-   ```
-   stock_trading_v1.7.0_portable.zip 다운로드
-   ```
+⚠️ **중요**: 업데이트 전에 **반드시 실행 중인 프로그램을 종료**하세요!
 
-3. **설정 복원**
-   ```
-   새 버전 압축 해제 → 백업한 data/ 폴더 복사
-   ```
+```bash
+# 실행 중인 프로그램에서 Ctrl + C로 종료
+```
 
-4. **실행**
-   ```
-   자동매매 시작.lnk 더블클릭
-   ```
+##### 3. 최신 코드 가져오기
 
-> ⚠️ **주의**: `data/` 폴더를 백업하지 않으면 재설정이 필요합니다!
+**3-1. 변경사항이 없는 경우 (권장)**
+
+```bash
+# 최신 코드 다운로드
+git pull
+
+# 또는 브랜치 명시
+git pull origin feature/gui-implementation  # feature 브랜치
+git pull origin master                      # master 브랜치
+```
+
+**3-2. 로컬 변경사항이 있는 경우**
+
+```bash
+# 변경사항 임시 저장
+git stash
+
+# 최신 코드 다운로드
+git pull
+
+# 저장한 변경사항 복원
+git stash pop
+```
+
+**3-3. 충돌 발생 시**
+
+```bash
+# 충돌 파일 확인
+git status
+
+# 충돌 파일 수동 수정 후
+git add <충돌파일>
+git commit -m "merge: 충돌 해결"
+```
+
+##### 4. 의존성 업데이트
+
+```bash
+# 새로운 패키지가 추가되었을 수 있음
+uv sync
+
+# 또는 pip 사용 시
+pip install -r requirements.txt
+```
+
+##### 5. 환경 변수 확인
+
+```bash
+# .env.example 파일과 비교
+diff .env .env.example
+
+# 새로운 설정이 추가되었다면 .env에 추가
+# 예: nano .env (또는 메모장으로 직접 편집)
+```
+
+**새로운 환경 변수 예시**:
+```env
+# v1.6.1에서 추가된 설정 (없으면 추가하세요)
+BUY_ORDER_TYPE=market
+STOP_LOSS_DELAY_MINUTES=1
+```
+
+##### 6. 업데이트 확인
+
+```bash
+# 최신 커밋 확인
+git log -3 --oneline
+
+# 프로그램 실행
+uv run python auto_trading.py
+```
+
+**업데이트 성공 메시지 예시**:
+```
+🚀 텔레그램 자동매매 시스템 시작
+✅ v1.6.1 - #매수신호 형식 지원
+```
+
+---
+
+#### 방법 B: Portable 패키지 업데이트 (일반 사용자)
+
+Portable 버전을 사용하는 경우 다음 절차를 따르세요.
+
+##### 1. 프로그램 종료
+
+⚠️ **중요**: 업데이트 전에 **반드시 실행 중인 프로그램을 종료**하세요!
+
+##### 2. 설정 백업
+
+```
+📂 기존 설치 폴더/data/ → USB 또는 다른 폴더로 복사
+
+포함 파일:
+- .env (환경 설정)
+- channel_copier.session (Telegram 로그인 정보)
+- daily_trading_lock.json (매수 이력)
+```
+
+##### 3. 새 버전 다운로드
+
+```
+stock_trading_v1.6.1_portable.zip 다운로드
+```
+
+##### 4. 압축 해제 및 설정 복원
+
+```
+1. 새 버전 압축 해제
+2. 백업한 data/ 폴더를 새 설치 폴더에 복사
+3. 덮어쓰기 확인
+```
+
+##### 5. 실행
+
+```
+자동매매 시작.lnk 더블클릭
+```
+
+> ⚠️ **주의**: `data/` 폴더를 백업하지 않으면 Telegram 재인증 및 환경 설정을 다시 해야 합니다!
+
+---
+
+#### 🆘 업데이트 문제 해결
+
+**문제 1: `git pull` 시 충돌 발생**
+```bash
+# 해결 방법: 로컬 변경사항 버리고 최신 버전으로 강제 업데이트
+git fetch origin
+git reset --hard origin/feature/gui-implementation
+```
+
+**문제 2: `uv sync` 실패**
+```bash
+# 해결 방법: 가상환경 재생성
+rm -rf .venv
+uv sync
+```
+
+**문제 3: 새로운 환경 변수를 찾을 수 없음**
+```bash
+# 해결 방법: .env.example 확인
+cat .env.example | grep -A 3 "새로운 설정"
+```
+
+**문제 4: Telegram 재인증 필요**
+```bash
+# 해결 방법: 세션 파일 삭제 후 재실행
+rm channel_copier.session*
+uv run python auto_trading.py
+```
 
 ## 📊 시스템 아키텍처
 
