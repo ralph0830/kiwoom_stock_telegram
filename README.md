@@ -88,8 +88,8 @@ Telegram 채널에서 매수 신호를 실시간으로 감지하여 자동 매�
 
 1. **저장소 클론**
 ```bash
-git clone https://github.com/yourusername/stock_tel.git
-cd stock_tel
+git clone https://github.com/ralph0830/kiwoom_stock_telegram
+cd kiwoom_stock_telegram
 ```
 
 2. **의존성 설치**
