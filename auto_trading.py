@@ -94,49 +94,90 @@ class TelegramTradingSystem(TradingSystemBase):
         적정 매수가 : 2,870원 👉 6.49%
         포착 현재가 : 2,860원 👉 6.12%
 
+        예시 메시지 2 (매수신호):
+        ✅ #매수신호
+        ￣￣￣￣￣￣￣￣￣￣￣￣￣￣￣
+        종목명 👉 벨로크 (424760)
+        매수가 👉 1,426원
+        등락률 👉 6.58%
+        ￣￣￣￣￣￣￣￣￣￣￣￣￣￣￣
+        매도가 👉 1,458원
+
         Returns:
             {
-                "stock_name": "유일에너테크",
-                "stock_code": "340930",
-                "target_price": 2870,
-                "current_price": 2860
+                "stock_name": "벨로크",
+                "stock_code": "424760",
+                "target_price": 1458,
+                "current_price": 1426
             }
         """
         try:
-            # 매수 신호인지 확인 (오직 "Ai 종목포착 시그널"만 인식)
-            if "Ai 종목포착 시그널" not in message_text and "종목포착" not in message_text:
+            # 매수 신호인지 확인 (두 가지 형식 지원)
+            is_ai_signal = "Ai 종목포착 시그널" in message_text or "종목포착" in message_text
+            is_buy_signal = "#매수신호" in message_text or "매수신호" in message_text
+
+            if not is_ai_signal and not is_buy_signal:
                 return None
 
-            # 종목명과 종목코드 추출
-            # 종목명이 비어있어도 종목코드만 있으면 매수 가능하도록 *? 사용 (0개 이상)
-            stock_pattern = r'(?:포착\s*)?종목명\s*[:：]\s*([가-힣a-zA-Z0-9＆&\s]*?)\s*\((\d{6})\)'
-            stock_match = re.search(stock_pattern, message_text)
+            # 형식 1: Ai 종목포착 시그널
+            if is_ai_signal:
+                # 종목명과 종목코드 추출
+                # 종목명이 비어있어도 종목코드만 있으면 매수 가능하도록 *? 사용 (0개 이상)
+                stock_pattern = r'(?:포착\s*)?종목명\s*[:：]\s*([가-힣a-zA-Z0-9＆&\s]*?)\s*\((\d{6})\)'
+                stock_match = re.search(stock_pattern, message_text)
 
-            if not stock_match:
-                logger.warning("⚠️ 종목명/종목코드를 찾을 수 없습니다")
-                return None
+                if not stock_match:
+                    logger.warning("⚠️ 종목명/종목코드를 찾을 수 없습니다")
+                    return None
 
-            stock_name = stock_match.group(1).strip()
-            stock_code = stock_match.group(2).strip()
+                stock_name = stock_match.group(1).strip()
+                stock_code = stock_match.group(2).strip()
 
-            # 종목명이 비어있으면 종목코드를 종목명으로 사용
-            if not stock_name:
-                stock_name = stock_code
-                logger.warning(f"⚠️ 종목명이 비어있어 종목코드({stock_code})를 종목명으로 사용합니다")
+                # 종목명이 비어있으면 종목코드를 종목명으로 사용
+                if not stock_name:
+                    stock_name = stock_code
+                    logger.warning(f"⚠️ 종목명이 비어있어 종목코드({stock_code})를 종목명으로 사용합니다")
 
-            # 적정 매수가 추출 (선택)
-            target_price = None
-            target_pattern = r'적정\s*매수가?\s*[:：]\s*([\d,]+)원?'
-            target_match = re.search(target_pattern, message_text)
-            if target_match:
-                target_price = int(target_match.group(1).replace(',', ''))
+                # 적정 매수가 추출 (선택)
+                target_price = None
+                target_pattern = r'적정\s*매수가?\s*[:：]\s*([\d,]+)원?'
+                target_match = re.search(target_pattern, message_text)
+                if target_match:
+                    target_price = int(target_match.group(1).replace(',', ''))
 
-            # 현재가 추출 (선택)
-            current_price = None
-            current_pattern = r'(?:포착\s*)?현재가\s*[:：]\s*([\d,]+)원?'
-            current_match = re.search(current_pattern, message_text)
-            if current_match:
-                current_price = int(current_match.group(1).replace(',', ''))
+                # 현재가 추출 (선택)
+                current_price = None
+                current_pattern = r'(?:포착\s*)?현재가\s*[:：]\s*([\d,]+)원?'
+                current_match = re.search(current_pattern, message_text)
+                if current_match:
+                    current_price = int(current_match.group(1).replace(',', ''))
+
+            # 형식 2: #매수신호
+            elif is_buy_signal:
+                # 종목명과 종목코드 추출 (👉 사용)
+                stock_pattern = r'종목명\s*👉\s*([가-힣a-zA-Z0-9＆&\s]+?)\s*\((\d{6})\)'
+                stock_match = re.search(stock_pattern, message_text)
+
+                if not stock_match:
+                    logger.warning("⚠️ 종목명/종목코드를 찾을 수 없습니다")
+                    return None
+
+                stock_name = stock_match.group(1).strip()
+                stock_code = stock_match.group(2).strip()
+
+                # 매수가 추출 (현재가로 사용)
+                current_price = None
+                buy_price_pattern = r'매수가\s*👉\s*([\d,]+)원?'
+                buy_price_match = re.search(buy_price_pattern, message_text)
+                if buy_price_match:
+                    current_price = int(buy_price_match.group(1).replace(',', ''))
+
+                # 매도가 추출 (목표가로 사용)
+                target_price = None
+                sell_price_pattern = r'매도가\s*👉\s*([\d,]+)원?'
+                sell_price_match = re.search(sell_price_pattern, message_text)
+                if sell_price_match:
+                    target_price = int(sell_price_match.group(1).replace(',', ''))
 
             result = {
                 "stock_name": stock_name,
