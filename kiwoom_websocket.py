@@ -31,14 +31,20 @@ class KiwoomWebSocket:
         self.current_prices = {}  # 종목코드별 현재가 캐시
         self.debug_mode = debug_mode  # 디버그 모드
 
-    async def connect(self):
-        """WebSocket 연결"""
+    async def connect(self, retry_count: int = 0):
+        """
+        WebSocket 연결 및 로그인
+
+        Args:
+            retry_count: 재시도 횟수 (내부 사용, 기본값: 0)
+        """
         try:
             logger.info(f"📡 WebSocket 연결 시도: {self.ws_url}")
 
-            # Access Token 발급 (없으면)
-            if not self.kiwoom_api.access_token:
-                self.kiwoom_api.get_access_token()
+            # Access Token 발급/갱신 (자동으로 만료 체크 및 재발급)
+            # get_access_token()이 이미 만료 체크를 하므로 명시적으로 호출
+            self.kiwoom_api.get_access_token()
+            logger.info("✅ Access Token 준비 완료 (만료 체크 통과)")
 
             # WebSocket 연결 (인증 헤더 포함)
             # ping_interval=None으로 설정하여 클라이언트 측 자동 ping 비활성화
@@ -68,12 +74,28 @@ class KiwoomWebSocket:
             login_data = json.loads(login_response)
             logger.info(f"📨 로그인 응답: {login_data}")
 
-            if login_data.get("return_code") == 0 or login_data.get("trnm") == "LOGIN":
+            if login_data.get("return_code") == 0:
                 logger.info("✅ WebSocket 로그인 성공!")
                 self.is_connected = True
             else:
+                # 로그인 실패 시 Token 문제일 수 있으므로 재발급 후 재시도
                 logger.error(f"❌ WebSocket 로그인 실패: {login_data}")
-                raise Exception(f"WebSocket 로그인 실패: {login_data}")
+
+                if retry_count == 0:
+                    logger.info("🔄 Token 재발급 후 재시도합니다...")
+
+                    # WebSocket 연결 종료
+                    if self.websocket:
+                        await self.websocket.close()
+
+                    # Token 강제 재발급 (기존 토큰을 무효화하고 새로 발급)
+                    self.kiwoom_api.access_token = None
+                    self.kiwoom_api._token_expiry = None
+
+                    # 재귀 호출로 재시도 (최대 1회)
+                    return await self.connect(retry_count=1)
+                else:
+                    raise Exception(f"WebSocket 로그인 실패 (재시도 완료): {login_data}")
 
         except Exception as e:
             logger.error(f"❌ WebSocket 연결 실패: {e}")
