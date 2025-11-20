@@ -262,6 +262,9 @@ class TelegramTradingSystem(TradingSystemBase):
                 current_price=signal.get("current_price")
             )
 
+            # 7. 10초 후 미체결 주문 자동 취소 백그라운드 태스크 시작
+            asyncio.create_task(self.cancel_outstanding_orders_after_delay(delay_seconds=10))
+
             if order_result and order_result.get("success"):
                 # 매수 기록 저장
                 self.record_today_trading(
@@ -288,6 +291,73 @@ class TelegramTradingSystem(TradingSystemBase):
         except Exception as e:
             logger.error(f"❌ Telegram 신호 처리 중 오류: {e}")
             self.order_executed = False
+
+    async def cancel_outstanding_orders_after_delay(self, delay_seconds: int = 10):
+        """
+        지정된 시간(기본 10초) 후 모든 미체결 주문을 자동 취소
+
+        Args:
+            delay_seconds: 대기 시간 (초)
+        """
+        try:
+            logger.info(f"⏰ {delay_seconds}초 후 미체결 주문 자동 취소 예약됨")
+
+            # 지정된 시간만큼 대기
+            await asyncio.sleep(delay_seconds)
+
+            logger.info(f"🔍 {delay_seconds}초 경과 - 미체결 주문 확인 중...")
+
+            # 미체결 주문 조회
+            outstanding_result = self.order_api.get_outstanding_orders()
+
+            if not outstanding_result or not outstanding_result.get("success"):
+                logger.warning("⚠️ 미체결 주문 조회 실패")
+                return
+
+            outstanding_orders = outstanding_result.get("outstanding_orders", [])
+
+            if not outstanding_orders:
+                logger.info("✅ 미체결 주문이 없습니다 (모두 체결 완료)")
+                return
+
+            # 모든 미체결 주문 취소
+            logger.warning(f"🚨 미체결 주문 {len(outstanding_orders)}건 발견 - 자동 취소 시작")
+
+            for order in outstanding_orders:
+                try:
+                    ord_no = order.get("ord_no", "")
+                    stock_code = order.get("stk_cd", "")
+                    stock_name = order.get("stk_nm", "")
+                    rmndr_qty = order.get("rmndr_qty", order.get("ord_qty", "0"))
+
+                    if not ord_no or not stock_code:
+                        logger.warning(f"⚠️ 주문정보 불완전 - 건너뜀: {order}")
+                        continue
+
+                    # 미체결 수량 전부 취소 (0 입력 시 잔량 전부 취소)
+                    cancel_qty = int(rmndr_qty) if rmndr_qty else 0
+
+                    logger.info(f"🗑️ 주문 취소 시도: {stock_name}({stock_code}) - 주문번호: {ord_no}, 수량: {cancel_qty}주")
+
+                    cancel_result = self.order_api.cancel_order(
+                        order_no=ord_no,
+                        stock_code=stock_code,
+                        quantity=cancel_qty
+                    )
+
+                    if cancel_result and cancel_result.get("success"):
+                        logger.info(f"✅ 주문 취소 성공: {stock_name}({stock_code})")
+                    else:
+                        logger.error(f"❌ 주문 취소 실패: {stock_name}({stock_code}) - {cancel_result.get('message', '알 수 없는 오류')}")
+
+                except Exception as e:
+                    logger.error(f"❌ 주문 취소 중 오류: {e}")
+                    continue
+
+            logger.info("✅ 미체결 주문 자동 취소 완료")
+
+        except Exception as e:
+            logger.error(f"❌ 미체결 주문 자동 취소 프로세스 오류: {e}")
 
     async def price_polling_loop(self):
         """REST API로 10초마다 현재가 조회 (WebSocket 백업)"""
