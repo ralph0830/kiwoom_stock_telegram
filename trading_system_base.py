@@ -289,36 +289,151 @@ class TradingSystemBase(ABC):
                 if not order_result.get("success"):
                     return None
 
-                # 매수 정보 저장
+                order_no = order_result.get("order_no")
                 buy_time = datetime.now()
-                self.buy_info = {
-                    "stock_code": stock_code,
-                    "stock_name": stock_name,
-                    "buy_price": current_price,  # 추정값
-                    "quantity": quantity,
-                    "buy_time": buy_time,
-                    "target_profit_rate": self.buy_info["target_profit_rate"],
-                    "is_verified": not self.config.enable_lazy_verification
-                }
 
-                # 결과 저장
-                result_data = {
-                    "stock_code": stock_code,
-                    "stock_name": stock_name,
-                    "current_price": current_price,
-                    "quantity": quantity
-                }
-                await self.save_trading_result(result_data, order_result)
+                # ========================================
+                # 병렬 처리: WebSocket 조기 시작 + 체결 확인
+                # ========================================
+                logger.info("=" * 80)
+                logger.info("🚀 병렬 처리 시작")
+                logger.info("1️⃣ WebSocket 즉시 시작 (급등/급락 타이밍 손실 방지)")
+                logger.info("2️⃣ 체결 확인 (안전성 확보)")
+                logger.info("=" * 80)
 
-                logger.info("✅ 시장가 매수 완료!")
+                # 태스크 1: WebSocket 조기 시작 (추정가 기반)
+                websocket_task = asyncio.create_task(
+                    self.start_websocket_monitoring_early(
+                        stock_code=stock_code,
+                        stock_name=stock_name,
+                        estimated_price=current_price,
+                        quantity=quantity
+                    )
+                )
 
-                if self.config.enable_lazy_verification:
-                    logger.info("⚡ 즉시 매도 모니터링을 시작합니다 (추정 매수가 기준)")
-                    logger.info("   첫 번째 실시간 시세 수신 시 실제 체결 정보를 자동으로 확인합니다")
-                else:
-                    logger.info("📝 추정 매수가로 매도 모니터링을 시작합니다")
+                # 태스크 2: 체결 확인 (실제 체결가 확인)
+                verification_task = asyncio.create_task(
+                    self.order_executor.wait_for_buy_execution(
+                        stock_code=stock_code,
+                        order_qty=quantity,
+                        order_no=order_no,
+                        timeout=10,  # 시장가는 빠르므로 10초면 충분
+                        interval=2   # 2초마다 확인
+                    )
+                )
 
-                return order_result
+                # 병렬 실행 (동시에 두 태스크 실행)
+                try:
+                    websocket_result, execution_result = await asyncio.gather(
+                        websocket_task,
+                        verification_task,
+                        return_exceptions=True
+                    )
+
+                    # WebSocket 시작 실패 확인
+                    if isinstance(websocket_result, Exception):
+                        logger.error(f"❌ WebSocket 시작 실패: {websocket_result}")
+                        # 체결 확인 결과가 있으면 계속 진행 (WebSocket은 재시도 가능)
+
+                    # 체결 확인 결과 처리
+                    if isinstance(execution_result, Exception):
+                        logger.error(f"❌ 체결 확인 실패: {execution_result}")
+                        # WebSocket 종료
+                        if self.websocket:
+                            await self.websocket.close()
+                        return None
+
+                    # ========================================
+                    # 체결 상태에 따른 처리
+                    # ========================================
+
+                    if execution_result['status'] == 'FULLY_EXECUTED':
+                        # 100% 체결 → 실제 체결가로 업데이트
+                        actual_price = execution_result['avg_buy_price']
+                        actual_qty = execution_result['executed_qty']
+
+                        logger.info("=" * 80)
+                        logger.info("✅ 체결 확인 완료! (100% 체결)")
+                        logger.info(f"   실제 평균 매입단가: {actual_price:,}원")
+                        logger.info(f"   실제 체결 수량: {actual_qty}주")
+                        logger.info(f"   추정가 대비 차이: {actual_price - current_price:+,}원 ({((actual_price - current_price) / current_price * 100):+.2f}%)")
+                        logger.info("💡 WebSocket은 이미 실행 중이며, 실제 체결가로 자동 업데이트됩니다")
+                        logger.info("=" * 80)
+
+                        # buy_info를 실제 체결가로 업데이트
+                        self.buy_info["buy_price"] = actual_price
+                        self.buy_info["quantity"] = actual_qty
+                        self.buy_info["buy_time"] = buy_time
+                        self.buy_info["is_verified"] = True
+
+                        # 결과 저장 (실제 체결가 기준)
+                        result_data = {
+                            "stock_code": stock_code,
+                            "stock_name": stock_name,
+                            "current_price": current_price,
+                            "actual_buy_price": actual_price,
+                            "quantity": actual_qty
+                        }
+                        await self.save_trading_result(result_data, order_result)
+
+                        logger.info("✅ 시장가 매수 완료! (병렬 처리)")
+                        return order_result
+
+                    elif execution_result['status'] == 'PARTIALLY_EXECUTED':
+                        # 부분 체결 → 체결분만 수용
+                        actual_price = execution_result['avg_buy_price']
+                        actual_qty = execution_result['executed_qty']
+
+                        logger.warning("=" * 80)
+                        logger.warning("⚠️ 부분 체결 발생!")
+                        logger.warning(f"   주문 수량: {quantity}주")
+                        logger.warning(f"   체결 수량: {actual_qty}주 ({actual_qty/quantity*100:.1f}%)")
+                        logger.warning(f"   실제 평균 매입단가: {actual_price:,}원")
+                        logger.warning("💡 체결분으로 매도 모니터링을 진행합니다")
+                        logger.warning("=" * 80)
+
+                        # buy_info를 실제 체결가로 업데이트
+                        self.buy_info["buy_price"] = actual_price
+                        self.buy_info["quantity"] = actual_qty
+                        self.buy_info["buy_time"] = buy_time
+                        self.buy_info["is_verified"] = True
+
+                        # 결과 저장
+                        result_data = {
+                            "stock_code": stock_code,
+                            "stock_name": stock_name,
+                            "current_price": current_price,
+                            "actual_buy_price": actual_price,
+                            "quantity": actual_qty,
+                            "partial_execution": True
+                        }
+                        await self.save_trading_result(result_data, order_result)
+
+                        logger.info("✅ 부분 체결 매수 완료! (병렬 처리)")
+                        return order_result
+
+                    else:  # NOT_EXECUTED
+                        # 미체결 → WebSocket 종료 및 실패 처리
+                        logger.error("=" * 80)
+                        logger.error("❌ 시장가 매수 미체결!")
+                        logger.error(f"   주문번호: {order_no}")
+                        logger.error(f"   주문 수량: {quantity}주")
+                        logger.error("💡 WebSocket을 종료하고 매수를 포기합니다")
+                        logger.error("=" * 80)
+
+                        # WebSocket 종료
+                        if self.websocket:
+                            await self.websocket.close()
+                            logger.info("✅ WebSocket 종료 완료")
+
+                        return None
+
+                except Exception as e:
+                    logger.error(f"❌ 병렬 처리 중 오류 발생: {e}")
+                    # WebSocket 종료
+                    if self.websocket:
+                        await self.websocket.close()
+                    return None
 
         except Exception as e:
             logger.error(f"❌ 매수 주문 실행 중 오류: {e}")
@@ -347,6 +462,61 @@ class TradingSystemBase(ABC):
 
         except Exception as e:
             logger.error(f"❌ WebSocket 모니터링 시작 실패: {e}")
+
+    async def start_websocket_monitoring_early(
+        self,
+        stock_code: str,
+        stock_name: str,
+        estimated_price: int,
+        quantity: int
+    ):
+        """
+        체결 확인 전 즉시 WebSocket 모니터링 시작 (추정가 기반)
+
+        병렬 처리 전략: 시장가 매수 후 즉시 WebSocket을 시작하여
+        급등/급락 타이밍을 놓치지 않습니다. 실제 체결가는 나중에 업데이트합니다.
+
+        Args:
+            stock_code: 종목코드
+            stock_name: 종목명
+            estimated_price: 추정 매수가 (현재가 기준)
+            quantity: 주문 수량
+        """
+        try:
+            # 임시로 추정가 설정 (실제 체결가는 나중에 업데이트)
+            self.buy_info["stock_code"] = stock_code
+            self.buy_info["stock_name"] = stock_name
+            self.buy_info["buy_price"] = estimated_price  # 추정값
+            self.buy_info["quantity"] = quantity  # 추정값
+            self.buy_info["is_verified"] = False  # 아직 미검증 (나중에 True로 변경)
+
+            # WebSocket 생성 및 연결
+            self.websocket = KiwoomWebSocket(
+                self.kiwoom_api,
+                debug_mode=self.config.debug_mode
+            )
+            await self.websocket.connect()
+
+            # 실시간 시세 등록
+            await self.websocket.register_stock(
+                stock_code,
+                self.on_price_update
+            )
+
+            # 실시간 수신 태스크 시작
+            self.ws_receive_task = asyncio.create_task(self.websocket.receive_loop())
+
+            logger.info("=" * 80)
+            logger.info("⚡ WebSocket 즉시 시작 (병렬 처리 전략)")
+            logger.info(f"종목: {stock_name} ({stock_code})")
+            logger.info(f"추정 매수가: {estimated_price:,}원 (실제 체결가는 확인 후 업데이트)")
+            logger.info(f"추정 수량: {quantity}주")
+            logger.info("💡 체결 확인과 병렬로 실행되어 매도 타이밍을 놓치지 않습니다")
+            logger.info("=" * 80)
+
+        except Exception as e:
+            logger.error(f"❌ WebSocket 조기 시작 실패: {e}")
+            raise
 
     # ========================================
     # 일일 매수 제한 관리
@@ -503,8 +673,9 @@ class TradingSystemBase(ABC):
             return
 
         # Lazy Verification: 첫 시세 수신 시 실제 체결 정보 확인
+        # 병렬 처리 시: 체결 확인보다 WebSocket이 먼저 데이터를 수신한 경우 백업 안전장치로 작동
         if self.config.enable_lazy_verification and not self.buy_info.get("is_verified", False):
-            logger.info("🔄 실제 체결 정보를 확인합니다...")
+            logger.info("🔄 실제 체결 정보를 확인합니다... (백업 안전장치)")
 
             try:
                 balance_result = self.kiwoom_api.get_account_balance()
