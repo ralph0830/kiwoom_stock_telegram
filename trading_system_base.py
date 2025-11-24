@@ -1273,10 +1273,15 @@ class TradingSystemBase(ABC):
         sell_quantity = actual_quantity if actual_quantity is not None else self.buy_info["quantity"]
         avg_buy_price = actual_buy_price if actual_buy_price is not None else self.buy_info["buy_price"]
 
+        # buy_info를 복사하여 datetime을 문자열로 변환
+        buy_info_json = self.buy_info.copy()
+        if buy_info_json.get("buy_time") and isinstance(buy_info_json["buy_time"], datetime):
+            buy_info_json["buy_time"] = buy_info_json["buy_time"].strftime("%Y-%m-%d %H:%M:%S")
+
         result = {
             "timestamp": timestamp,
             "action": "SELL",
-            "buy_info": self.buy_info,
+            "buy_info": buy_info_json,
             "actual_avg_buy_price": avg_buy_price,
             "sell_quantity": sell_quantity,
             "current_price": current_price,
@@ -1307,10 +1312,15 @@ class TradingSystemBase(ABC):
         sell_quantity = actual_quantity if actual_quantity is not None else self.buy_info["quantity"]
         avg_buy_price = actual_buy_price if actual_buy_price is not None else self.buy_info["buy_price"]
 
+        # buy_info를 복사하여 datetime을 문자열로 변환
+        buy_info_json = self.buy_info.copy()
+        if buy_info_json.get("buy_time") and isinstance(buy_info_json["buy_time"], datetime):
+            buy_info_json["buy_time"] = buy_info_json["buy_time"].strftime("%Y-%m-%d %H:%M:%S")
+
         result = {
             "timestamp": timestamp,
             "action": "STOP_LOSS",
-            "buy_info": self.buy_info,
+            "buy_info": buy_info_json,
             "actual_avg_buy_price": avg_buy_price,
             "sell_quantity": sell_quantity,
             "current_price": current_price,
@@ -1342,10 +1352,15 @@ class TradingSystemBase(ABC):
         sell_quantity = actual_quantity if actual_quantity is not None else self.buy_info["quantity"]
         avg_buy_price = actual_buy_price if actual_buy_price is not None else self.buy_info["buy_price"]
 
+        # buy_info를 복사하여 datetime을 문자열로 변환
+        buy_info_json = self.buy_info.copy()
+        if buy_info_json.get("buy_time") and isinstance(buy_info_json["buy_time"], datetime):
+            buy_info_json["buy_time"] = buy_info_json["buy_time"].strftime("%Y-%m-%d %H:%M:%S")
+
         result = {
             "timestamp": timestamp,
             "action": "DAILY_FORCE_SELL",
-            "buy_info": self.buy_info,
+            "buy_info": buy_info_json,
             "actual_avg_buy_price": avg_buy_price,
             "sell_quantity": sell_quantity,
             "current_price": current_price,
