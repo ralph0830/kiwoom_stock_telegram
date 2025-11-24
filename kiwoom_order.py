@@ -41,6 +41,10 @@ class KiwoomOrderAPI:
         self.access_token: Optional[str] = None
         self._token_expiry: Optional[datetime] = None  # 토큰 만료 시간
 
+        # 종목코드 검증 캐시 (메모리 캐싱)
+        self._stock_code_cache: Dict[str, Dict] = {}
+        # {종목코드: {"valid": bool, "cached_at": datetime, "stock_name": str}}
+
         if not self.app_key or not self.secret_key:
             raise ValueError(f"환경변수에 API KEY가 설정되어 있지 않습니다. (모의투자: {use_mock})")
 
@@ -541,6 +545,171 @@ class KiwoomOrderAPI:
                 "current_price": 0,
                 "message": str(e)
             }
+
+    def validate_stock_code(self, stock_code: str, use_cache: bool = True) -> Dict:
+        """
+        종목코드 유효성 검증 (3단계 검증 + 캐싱)
+
+        검증 단계:
+        1. 형식 검증: 6자리 숫자 여부
+        2. 범위 검증: 한국 주식시장 종목코드 범위 (000001 ~ 999999)
+        3. API 검증: 키움 API로 실제 종목 존재 여부 확인
+
+        캐싱 정책:
+        - 유효한 종목: 24시간 캐싱
+        - 무효한 종목: 1시간 캐싱 (나중에 상장될 수 있음)
+
+        Args:
+            stock_code: 검증할 종목코드 (6자리)
+            use_cache: 캐시 사용 여부 (기본: True)
+
+        Returns:
+            {
+                "valid": bool,           # 유효 여부
+                "stock_code": str,       # 종목코드
+                "stock_name": str,       # 종목명 (유효한 경우)
+                "reason": str,           # 무효 사유 (무효한 경우)
+                "cached": bool           # 캐시 사용 여부
+            }
+        """
+        # 1. 캐시 확인
+        if use_cache and stock_code in self._stock_code_cache:
+            cache_entry = self._stock_code_cache[stock_code]
+            cached_at = cache_entry["cached_at"]
+            is_valid = cache_entry["valid"]
+
+            # 캐시 만료 시간 계산
+            cache_duration = timedelta(hours=24) if is_valid else timedelta(hours=1)
+            cache_expiry = cached_at + cache_duration
+
+            # 캐시가 유효한 경우
+            if datetime.now() < cache_expiry:
+                logger.debug(f"✅ 캐시에서 종목코드 검증 결과 조회: {stock_code} (유효: {is_valid})")
+                return {
+                    "valid": is_valid,
+                    "stock_code": stock_code,
+                    "stock_name": cache_entry.get("stock_name", ""),
+                    "reason": cache_entry.get("reason", ""),
+                    "cached": True
+                }
+            else:
+                # 캐시 만료 - 캐시 삭제
+                logger.debug(f"⏰ 캐시 만료: {stock_code}")
+                del self._stock_code_cache[stock_code]
+
+        # 2. 형식 검증: 6자리 숫자 여부
+        if not stock_code or not isinstance(stock_code, str):
+            reason = "종목코드가 문자열이 아닙니다"
+            logger.warning(f"⚠️ 종목코드 형식 오류: {stock_code} - {reason}")
+            self._cache_validation_result(stock_code, False, "", reason)
+            return {
+                "valid": False,
+                "stock_code": stock_code,
+                "stock_name": "",
+                "reason": reason,
+                "cached": False
+            }
+
+        if not stock_code.isdigit():
+            reason = f"종목코드는 6자리 숫자여야 합니다 (입력값: {stock_code})"
+            logger.warning(f"⚠️ 종목코드 형식 오류: {stock_code} - {reason}")
+            self._cache_validation_result(stock_code, False, "", reason)
+            return {
+                "valid": False,
+                "stock_code": stock_code,
+                "stock_name": "",
+                "reason": reason,
+                "cached": False
+            }
+
+        if len(stock_code) != 6:
+            reason = f"종목코드는 6자리여야 합니다 (입력값: {len(stock_code)}자리)"
+            logger.warning(f"⚠️ 종목코드 형식 오류: {stock_code} - {reason}")
+            self._cache_validation_result(stock_code, False, "", reason)
+            return {
+                "valid": False,
+                "stock_code": stock_code,
+                "stock_name": "",
+                "reason": reason,
+                "cached": False
+            }
+
+        # 3. 범위 검증: 000001 ~ 999999
+        stock_code_int = int(stock_code)
+        if stock_code_int < 1 or stock_code_int > 999999:
+            reason = f"유효하지 않은 종목코드 범위 (000001 ~ 999999)"
+            logger.warning(f"⚠️ 종목코드 범위 오류: {stock_code} - {reason}")
+            self._cache_validation_result(stock_code, False, "", reason)
+            return {
+                "valid": False,
+                "stock_code": stock_code,
+                "stock_name": "",
+                "reason": reason,
+                "cached": False
+            }
+
+        # 4. API 검증: 실제 종목 존재 여부 확인
+        logger.debug(f"🔍 키움 API로 종목코드 검증 시작: {stock_code}")
+        price_result = self.get_current_price(stock_code)
+
+        if not price_result.get("success"):
+            reason = f"키움 API 조회 실패: {price_result.get('message', '알 수 없는 오류')}"
+            logger.warning(f"⚠️ 종목코드 API 검증 실패: {stock_code} - {reason}")
+            self._cache_validation_result(stock_code, False, "", reason)
+            return {
+                "valid": False,
+                "stock_code": stock_code,
+                "stock_name": "",
+                "reason": reason,
+                "cached": False
+            }
+
+        # 현재가가 0이거나 없으면 유효하지 않은 종목
+        current_price = price_result.get("current_price", 0)
+        if current_price <= 0:
+            reason = "종목 정보를 찾을 수 없습니다 (현재가 0원 또는 조회 불가)"
+            logger.warning(f"⚠️ 유효하지 않은 종목코드: {stock_code} - {reason}")
+            self._cache_validation_result(stock_code, False, "", reason)
+            return {
+                "valid": False,
+                "stock_code": stock_code,
+                "stock_name": "",
+                "reason": reason,
+                "cached": False
+            }
+
+        # 종목명 추출 (API 응답에서)
+        stock_name = price_result.get("data", {}).get("stk_nm", stock_code)
+
+        # 검증 성공
+        logger.info(f"✅ 종목코드 검증 성공: {stock_code} ({stock_name}) - 현재가: {current_price:,}원")
+        self._cache_validation_result(stock_code, True, stock_name, "")
+
+        return {
+            "valid": True,
+            "stock_code": stock_code,
+            "stock_name": stock_name,
+            "reason": "",
+            "cached": False
+        }
+
+    def _cache_validation_result(self, stock_code: str, valid: bool, stock_name: str, reason: str) -> None:
+        """
+        종목코드 검증 결과를 캐시에 저장
+
+        Args:
+            stock_code: 종목코드
+            valid: 유효 여부
+            stock_name: 종목명
+            reason: 무효 사유
+        """
+        self._stock_code_cache[stock_code] = {
+            "valid": valid,
+            "stock_name": stock_name,
+            "reason": reason,
+            "cached_at": datetime.now()
+        }
+        logger.debug(f"💾 종목코드 검증 결과 캐싱: {stock_code} (유효: {valid})")
 
     def get_account_balance(self, query_date: str = None) -> Dict:
         """

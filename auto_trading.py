@@ -86,21 +86,16 @@ class TelegramTradingSystem(TradingSystemBase):
         """
         텔레그램 메시지에서 종목 정보 파싱
 
-        예시 메시지 1 (Ai 종목포착 시그널):
-        ⭐️ Ai 종목포착 시그널
-        ￣￣￣￣￣￣￣￣￣￣￣￣￣￣￣
-        포착 종목명 : 유일에너테크 (340930)
-        적정 매수가 : 2,870원 👉 6.49%
-        포착 현재가 : 2,860원 👉 6.12%
+        **새 로직 (B안 - 유연성 우선):**
+        괄호 안 6자리 숫자를 종목코드로 인식하여 시그널 처리
+        키워드 검증 없이 모든 형식의 메시지 지원
 
-        예시 메시지 2 (매수신호):
-        ✅ #매수신호
-        ￣￣￣￣￣￣￣￣￣￣￣￣￣￣￣
-        종목명 👉 벨로크 (424760)
-        매수가 👉 1,426원
-        등락률 👉 6.58%
-        ￣￣￣￣￣￣￣￣￣￣￣￣￣￣￣
-        매도가 👉 1,458원
+        지원 형식 예시:
+        - ⭐️ Ai 종목포착 시그널\n포착 종목명 : 유일에너테크 (340930)
+        - ✅ #매수신호\n종목명 👉 벨로크 (424760)
+        - ✅ #알림\n종목명 : 아미노로직스 (074430)
+        - 급등주 추천: 테스트종목 (123456)
+        - 종목명이 없어도 OK:  (051980)
 
         Returns:
             {
@@ -111,86 +106,125 @@ class TelegramTradingSystem(TradingSystemBase):
             }
         """
         try:
-            # 매수 신호인지 확인 (두 가지 형식 지원)
-            is_ai_signal = "Ai 종목포착 시그널" in message_text or "종목포착" in message_text
-            is_buy_signal = "#매수신호" in message_text or "매수신호" in message_text
+            # 1. 괄호 안의 6자리 숫자 추출 (종목코드)
+            stock_code_pattern = r'\((\d{6})\)'
+            match = re.search(stock_code_pattern, message_text)
 
-            if not is_ai_signal and not is_buy_signal:
+            if not match:
+                logger.debug("ℹ️ 괄호 안의 6자리 숫자를 찾을 수 없습니다")
                 return None
 
-            # 형식 1: Ai 종목포착 시그널
-            if is_ai_signal:
-                # 종목명과 종목코드 추출
-                # 종목명이 비어있어도 종목코드만 있으면 매수 가능하도록 *? 사용 (0개 이상)
-                stock_pattern = r'(?:포착\s*)?종목명\s*[:：]\s*([가-힣a-zA-Z0-9＆&\s]*?)\s*\((\d{6})\)'
-                stock_match = re.search(stock_pattern, message_text)
+            stock_code = match.group(1)
 
-                if not stock_match:
-                    logger.warning("⚠️ 종목명/종목코드를 찾을 수 없습니다")
-                    return None
+            # 2. 종목코드 유효성 검증 (3단계 검증 + 캐싱)
+            logger.info(f"🔍 종목코드 유효성 검증 시작: {stock_code}")
+            validation_result = self.kiwoom_api.validate_stock_code(stock_code)
 
-                stock_name = stock_match.group(1).strip()
-                stock_code = stock_match.group(2).strip()
+            if not validation_result["valid"]:
+                reason = validation_result["reason"]
+                logger.warning(f"❌ 유효하지 않은 종목코드: {stock_code} - {reason}")
+                return None
 
-                # 종목명이 비어있으면 종목코드를 종목명으로 사용
-                if not stock_name:
-                    stock_name = stock_code
-                    logger.warning(f"⚠️ 종목명이 비어있어 종목코드({stock_code})를 종목명으로 사용합니다")
+            # 검증 성공 - API에서 받은 종목명 사용 (더 정확함)
+            validated_stock_name = validation_result["stock_name"]
+            cached_info = " (캐시됨)" if validation_result["cached"] else ""
+            logger.info(f"✅ 종목코드 검증 성공: {stock_code} ({validated_stock_name}){cached_info}")
 
-                # 적정 매수가 추출 (선택)
-                target_price = None
-                target_pattern = r'적정\s*매수가?\s*[:：]\s*([\d,]+)원?'
-                target_match = re.search(target_pattern, message_text)
-                if target_match:
-                    target_price = int(target_match.group(1).replace(',', ''))
+            # 3. 종목명 추출 (괄호 앞의 텍스트에서)
+            stock_name = self._extract_stock_name(message_text, stock_code)
 
-                # 현재가 추출 (선택)
-                current_price = None
-                current_pattern = r'(?:포착\s*)?현재가\s*[:：]\s*([\d,]+)원?'
-                current_match = re.search(current_pattern, message_text)
-                if current_match:
-                    current_price = int(current_match.group(1).replace(',', ''))
+            # 메시지에서 종목명을 찾지 못했으면 API에서 받은 종목명 사용
+            if not stock_name:
+                stock_name = validated_stock_name
+                logger.info(f"ℹ️ 메시지에서 종목명을 찾지 못해 API 종목명 사용: {stock_name}")
 
-            # 형식 2: #매수신호
-            elif is_buy_signal:
-                # 종목명과 종목코드 추출 (👉 사용)
-                stock_pattern = r'종목명\s*👉\s*([가-힣a-zA-Z0-9＆&\s]+?)\s*\((\d{6})\)'
-                stock_match = re.search(stock_pattern, message_text)
-
-                if not stock_match:
-                    logger.warning("⚠️ 종목명/종목코드를 찾을 수 없습니다")
-                    return None
-
-                stock_name = stock_match.group(1).strip()
-                stock_code = stock_match.group(2).strip()
-
-                # 매수가 추출 (현재가로 사용)
-                current_price = None
-                buy_price_pattern = r'매수가\s*👉\s*([\d,]+)원?'
-                buy_price_match = re.search(buy_price_pattern, message_text)
-                if buy_price_match:
-                    current_price = int(buy_price_match.group(1).replace(',', ''))
-
-                # 매도가 추출 (목표가로 사용)
-                target_price = None
-                sell_price_pattern = r'매도가\s*👉\s*([\d,]+)원?'
-                sell_price_match = re.search(sell_price_pattern, message_text)
-                if sell_price_match:
-                    target_price = int(sell_price_match.group(1).replace(',', ''))
+            # 4. 가격 정보 추출
+            prices = self._extract_prices(message_text)
 
             result = {
                 "stock_name": stock_name,
                 "stock_code": stock_code,
-                "target_price": target_price,
-                "current_price": current_price
+                "target_price": prices.get("target"),
+                "current_price": prices.get("current")
             }
 
-            logger.info(f"✅ 신호 파싱 완료: {result}")
+            logger.info(f"✅ 신호 파싱 완료 (6자리 숫자 기반 + 검증): {result}")
             return result
 
         except Exception as e:
             logger.error(f"❌ 신호 파싱 실패: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
             return None
+
+    def _extract_stock_name(self, message_text: str, stock_code: str) -> str:
+        """
+        괄호 앞에서 종목명 추출
+
+        예:
+        "포착 종목명 : 벨로크 (424760)" → "벨로크"
+        "종목명 👉 유일에너테크 (340930)" → "유일에너테크"
+        "종목명 : 아미노로직스 (074430)" → "아미노로직스"
+        "종목코드 (123456)" → ""
+        """
+        # 괄호 앞의 텍스트 패턴 (한글, 영문, 숫자, &, ＆)
+        pattern = r'([가-힣a-zA-Z0-9＆&]+)\s*\(' + re.escape(stock_code) + r'\)'
+        match = re.search(pattern, message_text)
+
+        if not match:
+            return ""
+
+        stock_name = match.group(1).strip()
+
+        # 불필요한 접두사 제거
+        # "포착 종목명 : 벨로크" → "벨로크"
+        # "종목명 👉 유일에너테크" → "유일에너테크"
+        stock_name = re.sub(r'.*[:：]\s*', '', stock_name).strip()
+        stock_name = re.sub(r'.*👉\s*', '', stock_name).strip()
+
+        return stock_name
+
+    def _extract_prices(self, message_text: str) -> dict:
+        """
+        메시지에서 가격 정보 추출
+
+        Returns:
+            {"target": int or None, "current": int or None}
+        """
+        prices = {"target": None, "current": None}
+
+        # 1. 적정 매수가, 매도가, 목표가 → target_price
+        target_patterns = [
+            r'적정\s*매수가?\s*[:：]\s*([\d,]+)원?',
+            r'매도가\s*[:：👉]\s*([\d,]+)원?',
+            r'목표가\s*[:：👉]\s*([\d,]+)원?'
+        ]
+
+        for pattern in target_patterns:
+            match = re.search(pattern, message_text)
+            if match:
+                try:
+                    prices["target"] = int(match.group(1).replace(',', ''))
+                    break
+                except (ValueError, AttributeError):
+                    continue
+
+        # 2. 현재가, 매수가, 포착 현재가 → current_price
+        current_patterns = [
+            r'(?:포착\s*)?현재가\s*[:：]\s*([\d,]+)원?',
+            r'매수가\s*[:：👉]\s*([\d,]+)원?'
+        ]
+
+        for pattern in current_patterns:
+            match = re.search(pattern, message_text)
+            if match:
+                try:
+                    prices["current"] = int(match.group(1).replace(',', ''))
+                    break
+                except (ValueError, AttributeError):
+                    continue
+
+        return prices
 
     async def handle_telegram_signal(self, event):
         """텔레그램 신호 처리 (이벤트 핸들러)"""
