@@ -60,9 +60,10 @@ async def test_real_channel():
 
             if result:
                 detected_count += 1
+                kst_time = system.to_kst(msg.date)
                 detected_messages.append({
                     "index": i,
-                    "date": msg.date.strftime("%Y-%m-%d %H:%M:%S"),
+                    "date": kst_time.strftime("%Y-%m-%d %H:%M:%S"),
                     "text": msg.text,
                     "result": result
                 })

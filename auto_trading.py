@@ -10,6 +10,7 @@ import logging
 import os
 import re
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from logging.handlers import RotatingFileHandler
@@ -81,6 +82,22 @@ class TelegramTradingSystem(TradingSystemBase):
         )
 
         logger.info("✅ TelegramTradingSystem 초기화 완료")
+
+    @staticmethod
+    def to_kst(utc_datetime):
+        """
+        UTC 시간을 한국 시간(KST, UTC+9)으로 변환
+
+        Args:
+            utc_datetime: UTC datetime 객체
+
+        Returns:
+            한국 시간으로 변환된 datetime 객체
+        """
+        if utc_datetime.tzinfo is None:
+            # timezone 정보가 없으면 UTC로 가정
+            utc_datetime = utc_datetime.replace(tzinfo=ZoneInfo("UTC"))
+        return utc_datetime.astimezone(ZoneInfo("Asia/Seoul"))
 
     def parse_stock_signal(self, message_text: str) -> dict:
         """
@@ -548,7 +565,8 @@ class TelegramTradingSystem(TradingSystemBase):
                     logger.info("📋 최근 메시지:")
                     for i, msg in enumerate(messages[:3], 1):
                         if msg.text:
-                            logger.info(f"   [{i}] {msg.date.strftime('%H:%M:%S')} - {msg.text[:50]}...")
+                            kst_time = self.to_kst(msg.date)
+                            logger.info(f"   [{i}] {kst_time.strftime('%H:%M:%S')} (KST) - {msg.text[:50]}...")
 
                 logger.info("💡 놓친 메시지는 자동 매수하지 않습니다. 실시간 메시지만 처리합니다.")
 

@@ -7,6 +7,7 @@ import asyncio
 import re
 import os
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from telethon import TelegramClient
 
@@ -18,6 +19,13 @@ API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 SESSION_NAME = os.getenv("SESSION_NAME", "channel_copier")
 SOURCE_CHANNEL = os.getenv("SOURCE_CHANNEL")
+
+
+def to_kst(utc_datetime):
+    """UTC 시간을 한국 시간(KST, UTC+9)으로 변환"""
+    if utc_datetime.tzinfo is None:
+        utc_datetime = utc_datetime.replace(tzinfo=ZoneInfo("UTC"))
+    return utc_datetime.astimezone(ZoneInfo("Asia/Seoul"))
 
 
 def parse_stock_signal_old(message_text: str) -> dict:
@@ -253,9 +261,10 @@ async def analyze_channel_messages():
 
             # 상세 결과 저장 (시그널 감지된 것만)
             if has_old or has_new:
+                kst_time = to_kst(msg.date)
                 detailed_results.append({
                     "index": i,
-                    "date": msg.date.strftime("%Y-%m-%d %H:%M:%S"),
+                    "date": kst_time.strftime("%Y-%m-%d %H:%M:%S"),
                     "text": msg.text,
                     "old": result_old,
                     "new": result_new,

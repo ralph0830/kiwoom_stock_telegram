@@ -10,6 +10,7 @@ import asyncio
 import os
 import re
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from telethon import TelegramClient
 
@@ -29,9 +30,16 @@ class MessageAnalyzer:
         # Telegram 클라이언트
         self.telegram_client = TelegramClient(
             self.session_name,
-            self.api_id, 
+            self.api_id,
             self.api_hash
         )
+
+    @staticmethod
+    def to_kst(utc_datetime):
+        """UTC 시간을 한국 시간(KST, UTC+9)으로 변환"""
+        if utc_datetime.tzinfo is None:
+            utc_datetime = utc_datetime.replace(tzinfo=ZoneInfo("UTC"))
+        return utc_datetime.astimezone(ZoneInfo("Asia/Seoul"))
 
     def parse_stock_signal(self, message_text: str) -> dict:
         """
@@ -186,7 +194,8 @@ class MessageAnalyzer:
             print("\n🔍 DSC 관련 메시지 상세 분석:")
             for i, msg in enumerate(dsc_messages, 1):
                 print(f"\n📨 DSC 메시지 {i}")
-                print(f"⏰ 시간: {msg.date.strftime('%Y-%m-%d %H:%M:%S')}")
+                kst_time = self.to_kst(msg.date)
+                print(f"⏰ 시간: {kst_time.strftime('%Y-%m-%d %H:%M:%S')} (KST)")
                 print(f"💬 전체 내용:\n{msg.text}")
                 
                 # 6자리 숫자 찾기
@@ -215,9 +224,10 @@ class MessageAnalyzer:
                 # DSC 메시지는 건너뛰고 (이미 위에서 분석함)
                 if 'DSC' in msg.text:
                     continue
-                    
+
                 print(f"\n📨 메시지 {i}")
-                print(f"⏰ 시간: {msg.date.strftime('%Y-%m-%d %H:%M:%S')}")
+                kst_time = self.to_kst(msg.date)
+                print(f"⏰ 시간: {kst_time.strftime('%Y-%m-%d %H:%M:%S')} (KST)")
                 print(f"💬 내용: {msg.text[:100]}...")
                 
                 # 신고 파싱 시도
