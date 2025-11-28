@@ -328,13 +328,20 @@ class OrderExecutor:
                 - success: bool (매도 모니터링 시작 여부)
         """
         elapsed = 0
+        check_count = 0
 
         logger.info("⏳ 매수 체결 확인 시작")
         logger.info(f"타임아웃: {timeout}초, 주기: {interval}초")
 
         while elapsed < timeout:
-            await asyncio.sleep(interval)
-            elapsed += interval
+            check_count += 1
+
+            # 첫 번째 체크는 즉시, 이후부터 interval 대기
+            if check_count > 1:
+                await asyncio.sleep(interval)
+                elapsed += interval
+
+            logger.info(f"📊 체결 확인 {check_count}회 시도 (경과: {elapsed}초)")
 
             # ========================================
             # 1. 미체결 주문 조회
@@ -354,7 +361,7 @@ class OrderExecutor:
 
             # 미체결 목록에 없으면 100% 체결된 것으로 판단
             if not order_found:
-                logger.debug("✅ 미체결 목록에 없음 → 100% 체결 가능성")
+                logger.info("✅ 미체결 목록에 없음 → 체결 완료!")
                 rmndr_qty = 0
 
             # ========================================
@@ -377,7 +384,55 @@ class OrderExecutor:
             # 3. 체결 상태 판별
             # ========================================
 
-            # 케이스 1: 100% 완전 체결
+            # 🔧 개선된 로직: 미체결 목록에 없으면 체결된 것으로 판단
+            # (계좌 반영이 늦더라도 미체결 목록이 정확함)
+            if not order_found and actual_qty > 0:
+                # 미체결 목록에 없고 계좌에 있으면 → 100% 체결
+                logger.info("=" * 80)
+                logger.info(f"✅ 매수 100% 체결 완료! ({elapsed}초 소요)")
+                logger.info(f"체결 수량: {actual_qty}주")
+                logger.info(f"평균 매입단가: {avg_buy_price:,}원")
+                logger.info("=" * 80)
+
+                return {
+                    'status': 'FULLY_EXECUTED',
+                    'executed_qty': actual_qty,
+                    'remaining_qty': 0,
+                    'avg_buy_price': avg_buy_price,
+                    'success': True
+                }
+            elif not order_found and actual_qty == 0:
+                # 미체결 목록에 없는데 계좌에도 없음 → 계좌 반영 대기
+                logger.info("⏳ 미체결 목록에 없으나 계좌 반영 대기 중...")
+                # 최대 3회(6초)까지만 대기, 이후 재조회
+                if check_count >= 3:
+                    # 마지막으로 한 번 더 확인
+                    logger.warning("⚠️ 계좌 반영이 늦습니다. 최종 확인 중...")
+                    balance = self.api.get_account_balance()
+                    if balance.get("success"):
+                        for holding in balance.get("holdings", []):
+                            if holding.get("stk_cd") == stock_code:
+                                actual_qty = int(holding.get("rmnd_qty", 0))
+                                avg_buy_price = int(holding.get("buy_uv", 0))
+                                break
+
+                    if actual_qty > 0:
+                        logger.info("=" * 80)
+                        logger.info(f"✅ 매수 체결 확인! (계좌 반영 지연)")
+                        logger.info(f"체결 수량: {actual_qty}주")
+                        logger.info(f"평균 매입단가: {avg_buy_price:,}원")
+                        logger.info("=" * 80)
+
+                        return {
+                            'status': 'FULLY_EXECUTED',
+                            'executed_qty': actual_qty,
+                            'remaining_qty': 0,
+                            'avg_buy_price': avg_buy_price,
+                            'success': True
+                        }
+                continue
+
+            # 케이스 1: 100% 완전 체결 (기존 로직)
             if rmndr_qty == 0 and actual_qty >= order_qty:
                 logger.info("=" * 80)
                 logger.info(f"✅ 매수 100% 체결 완료! ({elapsed}초 소요)")
@@ -432,16 +487,59 @@ class OrderExecutor:
             logger.info(f"⏳ 체결 대기 중... ({elapsed}/{timeout}초)")
 
         # ========================================
-        # 케이스 3: 타임아웃 - 0% 미체결
+        # 케이스 3: 타임아웃 - 최종 확인
         # ========================================
         logger.info("=" * 80)
-        logger.warning(f"⚠️ 매수 미체결! (타임아웃: {timeout}초)")
-        logger.info(f"주문 수량: {order_qty}주")
-        logger.info("체결 수량: 0주")
+        logger.warning(f"⚠️ 체결 확인 타임아웃 ({timeout}초)")
+        logger.info("🔍 최종 확인 중...")
         logger.info("=" * 80)
 
-        # 미체결 주문 취소
-        logger.info("🔄 미체결 주문을 취소합니다...")
+        # 최종 미체결 주문 확인
+        outstanding_final = self.api.get_outstanding_orders()
+        order_found_final = False
+
+        if outstanding_final.get("success"):
+            for order in outstanding_final.get("outstanding_orders", []):
+                if order.get("ord_no") == order_no:
+                    order_found_final = True
+                    break
+
+        # 미체결 목록에 없으면 → 체결 완료 (계좌 재확인)
+        if not order_found_final:
+            logger.info("✅ 미체결 목록에 없음 → 체결 완료로 판단!")
+            logger.info("📊 계좌 잔고 최종 확인 중...")
+
+            balance_final = self.api.get_account_balance()
+            actual_qty_final = 0
+            avg_buy_price_final = 0
+
+            if balance_final.get("success"):
+                for holding in balance_final.get("holdings", []):
+                    if holding.get("stk_cd") == stock_code:
+                        actual_qty_final = int(holding.get("rmnd_qty", 0))
+                        avg_buy_price_final = int(holding.get("buy_uv", 0))
+                        break
+
+            if actual_qty_final > 0:
+                logger.info("=" * 80)
+                logger.info(f"✅ 매수 체결 확인! (타임아웃 후 재확인)")
+                logger.info(f"체결 수량: {actual_qty_final}주")
+                logger.info(f"평균 매입단가: {avg_buy_price_final:,}원")
+                logger.info("=" * 80)
+
+                return {
+                    'status': 'FULLY_EXECUTED',
+                    'executed_qty': actual_qty_final,
+                    'remaining_qty': 0,
+                    'avg_buy_price': avg_buy_price_final,
+                    'success': True
+                }
+
+        # 진짜 미체결 → 주문 취소
+        logger.warning("⚠️ 미체결 주문 존재 - 취소 시도")
+        logger.info(f"주문 수량: {order_qty}주")
+        logger.info("체결 수량: 0주")
+
         cancel_result = self.api.cancel_order(
             order_no=order_no,
             stock_code=stock_code,
@@ -451,7 +549,40 @@ class OrderExecutor:
         if cancel_result.get("success"):
             logger.info("✅ 미체결 주문 취소 완료")
         else:
-            logger.warning("⚠️ 미체결 주문 취소 실패 (수동 확인 필요)")
+            # 취소 실패 = 이미 체결되었을 가능성
+            error_msg = cancel_result.get("message", "")
+            if "취소가능수량이 없습니다" in str(error_msg) or "506550" in str(error_msg):
+                logger.warning("⚠️ '취소가능수량이 없습니다' → 체결 완료로 재판정!")
+
+                # 계좌 재조회
+                balance_recheck = self.api.get_account_balance()
+                actual_qty_recheck = 0
+                avg_buy_price_recheck = 0
+
+                if balance_recheck.get("success"):
+                    for holding in balance_recheck.get("holdings", []):
+                        if holding.get("stk_cd") == stock_code:
+                            actual_qty_recheck = int(holding.get("rmnd_qty", 0))
+                            avg_buy_price_recheck = int(holding.get("buy_uv", 0))
+                            break
+
+                if actual_qty_recheck > 0:
+                    logger.info("=" * 80)
+                    logger.info(f"✅ 매수 체결 확인! (취소 실패 후 재확인)")
+                    logger.info(f"체결 수량: {actual_qty_recheck}주")
+                    logger.info(f"평균 매입단가: {avg_buy_price_recheck:,}원")
+                    logger.info("=" * 80)
+
+                    return {
+                        'status': 'FULLY_EXECUTED',
+                        'executed_qty': actual_qty_recheck,
+                        'remaining_qty': 0,
+                        'avg_buy_price': avg_buy_price_recheck,
+                        'success': True
+                    }
+
+            logger.warning(f"⚠️ 미체결 주문 취소 실패: {error_msg}")
+            logger.warning("⚠️ 수동 확인 필요!")
 
         return {
             'status': 'NOT_EXECUTED',

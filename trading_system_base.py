@@ -188,10 +188,16 @@ class TradingSystemBase(ABC):
 
                 order_no = order_result.get("order_no")
 
+                # 🔧 API가 반환한 실제 주문 수량 (증거금 부족 시 조정될 수 있음)
+                actual_order_qty = order_result.get("quantity", quantity)
+
+                if actual_order_qty != quantity:
+                    logger.warning(f"⚠️ 주문 수량 조정됨: {quantity}주 → {actual_order_qty}주")
+
                 # 체결 확인 (부분 체결 처리 포함)
                 execution_result = await self.order_executor.wait_for_buy_execution(
                     stock_code=stock_code,
-                    order_qty=quantity,
+                    order_qty=actual_order_qty,  # ✅ 실제 주문 수량으로 체결 확인
                     order_no=order_no,
                     timeout=self.config.buy_execution_timeout,
                     interval=self.config.buy_execution_check_interval
@@ -292,6 +298,12 @@ class TradingSystemBase(ABC):
                 order_no = order_result.get("order_no")
                 buy_time = datetime.now()
 
+                # 🔧 API가 반환한 실제 주문 수량 (증거금 부족 시 조정된 수량)
+                actual_order_qty = order_result.get("quantity", quantity)
+
+                if actual_order_qty != quantity:
+                    logger.warning(f"⚠️ 주문 수량 조정됨: {quantity}주 → {actual_order_qty}주 (증거금 부족)")
+
                 # ========================================
                 # 병렬 처리: WebSocket 조기 시작 + 체결 확인
                 # ========================================
@@ -307,7 +319,7 @@ class TradingSystemBase(ABC):
                         stock_code=stock_code,
                         stock_name=stock_name,
                         estimated_price=current_price,
-                        quantity=quantity
+                        quantity=actual_order_qty  # ✅ 실제 주문 수량 사용
                     )
                 )
 
@@ -315,7 +327,7 @@ class TradingSystemBase(ABC):
                 verification_task = asyncio.create_task(
                     self.order_executor.wait_for_buy_execution(
                         stock_code=stock_code,
-                        order_qty=quantity,
+                        order_qty=actual_order_qty,  # ✅ 실제 주문 수량으로 체결 확인
                         order_no=order_no,
                         timeout=10,  # 시장가는 빠르므로 10초면 충분
                         interval=2   # 2초마다 확인

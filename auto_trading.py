@@ -359,7 +359,7 @@ class TelegramTradingSystem(TradingSystemBase):
             logger.info(f"🔍 {delay_seconds}초 경과 - 미체결 주문 확인 중...")
 
             # 미체결 주문 조회
-            outstanding_result = self.order_api.get_outstanding_orders()
+            outstanding_result = self.kiwoom_api.get_outstanding_orders()
 
             if not outstanding_result or not outstanding_result.get("success"):
                 logger.warning("⚠️ 미체결 주문 조회 실패")
@@ -390,7 +390,7 @@ class TelegramTradingSystem(TradingSystemBase):
 
                     logger.info(f"🗑️ 주문 취소 시도: {stock_name}({stock_code}) - 주문번호: {ord_no}, 수량: {cancel_qty}주")
 
-                    cancel_result = self.order_api.cancel_order(
+                    cancel_result = self.kiwoom_api.cancel_order(
                         order_no=ord_no,
                         stock_code=stock_code,
                         quantity=cancel_qty
